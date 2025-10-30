@@ -2,6 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ref, onValue, push, set, update, remove } from 'firebase/database';
 import { database } from '../../firebase';
 import { uploadPhotoToCloudinary, uploadAudioToCloudinary } from '../../utils/cloudinaryUpload';
+import { 
+  PhotoIcon, 
+  PencilIcon, 
+  MicrophoneIcon, 
+  PaperAirplaneIcon, 
+  Cog6ToothIcon 
+} from '@heroicons/react/24/outline';
 
 const ChatRoom = ({ user, onDisconnect }) => {
   console.log('FORCE PROOF: THIS IS THE LATEST CHATROOM - v2025.10.31');
@@ -368,7 +375,9 @@ const ChatRoom = ({ user, onDisconnect }) => {
               )}
             </div>
           </div>
-          <button onClick={() => setShowSettings(!showSettings)} className={`text-3xl hover:scale-110 ${darkMode ? 'text-white' : 'text-white'}`}>Settings</button>
+          <button onClick={() => setShowSettings(!showSettings)} className="hover:scale-110 transition-transform">
+            <Cog6ToothIcon className="w-8 h-8 text-white" />
+          </button>
         </div>
 
         {showSettings && (
@@ -437,14 +446,44 @@ const ChatRoom = ({ user, onDisconnect }) => {
           </div>
         )}
         <div className="flex items-center gap-2">
-          <input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} onKeyPress={handleKeyPress} placeholder="Type..." disabled={sending} className={`flex-1 px-4 py-3 border-2 rounded-2xl text-sm outline-none ${darkMode ? 'bg-gray-800 border-gray-600 text-white' : 'border-pink-200'} focus:ring-2 focus:ring-pink-300`} />
-          <button onClick={sendMessage} disabled={sending || !newMessage.trim()} className="bg-gradient-to-r from-pink-500 to-purple-500 text-white px-6 py-3 rounded-2xl hover:from-pink-600 hover:to-purple-600 disabled:opacity-50 font-semibold shadow-lg">
-            {sending ? 'Hourglass' : 'Envelope'}
+          <input 
+            type="text" 
+            value={newMessage} 
+            onChange={(e) => setNewMessage(e.target.value)} 
+            onKeyPress={handleKeyPress} 
+            placeholder="Type your message..." 
+            disabled={sending || isRecording}
+            className={`flex-1 px-4 py-3 border-2 rounded-2xl text-sm outline-none transition-all ${darkMode ? 'bg-gray-800 border-gray-600 text-white placeholder-gray-400' : 'border-pink-200 bg-white text-gray-800 placeholder-gray-500'} focus:ring-2 focus:ring-pink-300 focus:border-pink-300 ${sending || isRecording ? 'opacity-50' : ''}`}
+          />
+          
+          <button 
+            onClick={sendMessage} 
+            disabled={sending || !newMessage.trim() || isRecording}
+            className={`p-3 rounded-2xl transition-all ${sending || !newMessage.trim() || isRecording ? 'opacity-50 cursor-not-allowed' : 'bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 hover:scale-105 shadow-lg'}`}
+          >
+            <PaperAirplaneIcon className="w-6 h-6 text-white" />
           </button>
-          <button onClick={() => fileInputRef.current?.click()} disabled={sending} className="text-pink-500 text-3xl hover:scale-110" title="Photo">Camera</button>
-          <button onClick={() => setShowDrawing(true)} disabled={sending} className="text-purple-500 text-3xl hover:scale-110" title="Draw">Pencil</button>
-          <button onClick={isRecording ? stopRecording : startRecording} disabled={sending} className={`text-3xl hover:scale-110 ${isRecording ? 'text-red-500 animate-pulse' : 'text-blue-500'}`} title="Voice">Microphone</button>
-          <input type="file" accept="image/*" ref={fileInputRef} className="hidden" onChange={handleImageUpload} />
+
+          <label className="cursor-pointer">
+            <input type="file" accept="image/*" ref={fileInputRef} className="hidden" onChange={handleImageUpload} />
+            <PhotoIcon className={`w-8 h-8 transition-transform ${sending || isRecording ? 'text-gray-400' : 'text-pink-500 hover:scale-110'}`} />
+          </label>
+
+          <button 
+            onClick={() => setShowDrawing(true)} 
+            disabled={sending || isRecording}
+            className={`transition-transform ${sending || isRecording ? 'opacity-50' : 'hover:scale-110'}`}
+          >
+            <PencilIcon className={`w-8 h-8 ${sending || isRecording ? 'text-gray-400' : 'text-purple-500'}`} />
+          </button>
+
+          <button 
+            onClick={isRecording ? stopRecording : startRecording} 
+            disabled={sending}
+            className={`transition-transform ${sending ? 'opacity-50' : ''} ${isRecording ? 'animate-pulse' : ''}`}
+          >
+            <MicrophoneIcon className={`w-8 h-8 ${isRecording ? 'text-red-500' : sending ? 'text-gray-400' : 'text-blue-500'} ${!sending && 'hover:scale-110'}`} />
+          </button>
         </div>
       </div>
 
@@ -452,7 +491,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
       {showDrawing && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className={`rounded-3xl p-6 shadow-2xl max-w-md w-full ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
-            <h3 className="text-xl font-bold text-center mb-4">Draw!</h3>
+            <h3 className="text-xl font-bold text-center mb-4">Draw Something Sweet!</h3>
             <canvas ref={canvasRef} width={300} height={300} className="border-2 border-pink-200 rounded-2xl cursor-crosshair mb-4 block mx-auto bg-white shadow-inner" onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={stopDrawing} onMouseLeave={stopDrawing} />
             <div className="flex gap-2 justify-center mb-4">
               {['#FF1493', '#FF69B4', '#9370DB', '#4169E1', '#000000', '#FFD700'].map(c => (
@@ -463,7 +502,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
               <button onClick={clearCanvas} className="flex-1 bg-gray-200 text-gray-700 px-4 py-2 rounded-xl hover:bg-gray-300 transition font-medium">Clear</button>
               <button onClick={() => setShowDrawing(false)} className="flex-1 bg-red-100 text-red-600 px-4 py-2 rounded-xl hover:bg-red-200 transition font-medium">Cancel</button>
               <button onClick={sendDrawing} disabled={sending} className="flex-1 bg-gradient-to-r from-pink-500 to-purple-500 text-white px-4 py-2 rounded-xl hover:from-pink-600 hover:to-purple-600 disabled:opacity-50 font-semibold shadow-lg">
-                {sending ? 'Hourglass' : 'Send Heart'}
+                {sending ? 'Sending...' : 'Send'}
               </button>
             </div>
           </div>
