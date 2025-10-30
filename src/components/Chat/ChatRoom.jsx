@@ -10,17 +10,19 @@ import {
   Cog6ToothIcon,
   UserCircleIcon,
   FaceSmileIcon,
-  CameraIcon
+  CameraIcon,
+  PlusIcon
 } from '@heroicons/react/24/outline';
 
-// REAL EMOJIS — NOT TEXT
-const EMOJIS = ['Thumbs Up', 'Red Heart', 'Face with Tears of Joy', 'Loudly Crying Face', 'Pleading Face', 'Thinking Face'];
-
-// FIXED: Real Unicode emojis
-const SKETCH_EMOJIS = ['❤️', '✨', '🔥', '🌹', '😘', '🥲'];
+// FULL EMOJI PALETTE
+const ALL_EMOJIS = [
+  '❤️', '✨', '🔥', '🌹', '😘', '🥲', '😍', '💕', '🌟', '💖',
+  '😊', '🥰', '😘', '💋', '😢', '😂', '🥹', '😜', '😎', '🤗',
+  '🌸', '🌺', '🌈', '🦋', '🌙', '⭐', '💫', '✨', '🎈', '🎉'
+];
 
 const ChatRoom = ({ user, onDisconnect }) => {
-  console.log('FORCE PROOF: v2025.11.02 - REAL EMOJIS (UNICODE) + WHATSAPP TICKS');
+  console.log('FORCE PROOF: v2025.11.03 - DRAG EMOJIS + UNLIMITED + WHATSAPP TICKS');
 
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
@@ -53,6 +55,11 @@ const ChatRoom = ({ user, onDisconnect }) => {
   const touchStartX = useRef(0);
   const touchMsgId = useRef(null);
 
+  // DRAG EMOJI STATE
+  const [placedEmojis, setPlacedEmojis] = useState([]); // { emoji, x, y, id }
+  const [draggingEmoji, setDraggingEmoji] = useState(null);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+
   const MAX_RECORDING_SECONDS = 240;
 
   const scrollToBottom = () => {
@@ -81,10 +88,22 @@ const ChatRoom = ({ user, onDisconnect }) => {
       context.lineWidth = 4;
       setCtx(context);
 
-      context.fillStyle = canvasBg;
-      context.fillRect(0, 0, canvas.width, canvas.height);
+      redrawCanvas();
     }
-  }, [showDrawing, canvasBg]);
+  }, [showDrawing, canvasBg, placedEmojis]);
+
+  const redrawCanvas = () => {
+    if (!ctx || !canvasRef.current) return;
+    const canvas = canvasRef.current;
+    ctx.fillStyle = canvasBg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Redraw all placed emojis
+    placedEmojis.forEach(item => {
+      ctx.font = '30px serif';
+      ctx.fillText(item.emoji, item.x - 15, item.y + 10);
+    });
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -259,30 +278,58 @@ const ChatRoom = ({ user, onDisconnect }) => {
   const formatMsgTime = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   const startDrawing = (e) => { 
-    if (!ctx) return; 
+    if (!ctx || draggingEmoji) return; 
     setIsDrawing(true); 
     const r = canvasRef.current.getBoundingClientRect(); 
     ctx.beginPath(); 
     ctx.moveTo(e.clientX - r.left, e.clientY - r.top); 
   };
   const draw = (e) => { 
-    if (!isDrawing || !ctx) return; 
+    if (!isDrawing || !ctx || draggingEmoji) return; 
     const r = canvasRef.current.getBoundingClientRect(); 
     ctx.strokeStyle = drawColor; 
     ctx.lineTo(e.clientX - r.left, e.clientY - r.top); 
     ctx.stroke(); 
   };
   const stopDrawing = () => setIsDrawing(false);
+
   const clearCanvas = () => {
-    if (!ctx) return;
-    ctx.fillStyle = canvasBg;
-    ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+    setPlacedEmojis([]);
+    redrawCanvas();
   };
 
-  const drawEmoji = (emoji, x, y) => { 
-    if (!ctx) return;
-    ctx.font = '30px serif'; 
-    ctx.fillText(emoji, x, y); 
+  const addEmojiToCanvas = (emoji, x = 150, y = 150) => {
+    const newEmoji = { emoji, x, y, id: Date.now() };
+    setPlacedEmojis(prev => [...prev, newEmoji]);
+  };
+
+  const startDrag = (e, item) => {
+    e.preventDefault();
+    const rect = canvasRef.current.getBoundingClientRect();
+    setDraggingEmoji(item);
+    setDragOffset({
+      x: e.clientX - rect.left - item.x,
+      y: e.clientY - rect.top - item.y
+    });
+  };
+
+  const onDrag = (e) => {
+    if (!draggingEmoji || !canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const newX = e.clientX - rect.left - dragOffset.x;
+    const newY = e.clientY - rect.top - dragOffset.y;
+
+    setPlacedEmojis(prev => prev.map(p =>
+      p.id === draggingEmoji.id ? { ...p, x: newX, y: newY } : p
+    ));
+  };
+
+  const stopDrag = () => {
+    setDraggingEmoji(null);
+  };
+
+  const deleteEmoji = (id) => {
+    setPlacedEmojis(prev => prev.filter(p => p.id !== id));
   };
 
   const sendDrawing = async () => {
@@ -307,7 +354,8 @@ const ChatRoom = ({ user, onDisconnect }) => {
           seen: false
         });
         setShowDrawing(false);
-        clearCanvas();
+        setPlacedEmojis([]);
+        redrawCanvas();
       } catch (err) { alert('Drawing failed.'); }
       setSending(false);
     }, 'image/png');
@@ -322,11 +370,6 @@ const ChatRoom = ({ user, onDisconnect }) => {
       await set(reactionRef, emoji);
     }
     setReactingTo(null);
-  };
-
-  const deleteMessage = async (msgId) => {
-    if (!window.confirm('Delete?')) return;
-    await remove(ref(database, `chats/${userData.coupleCode}/${msgId}`));
   };
 
   const handleTouchStart = (e, msgId) => {
@@ -355,7 +398,6 @@ const ChatRoom = ({ user, onDisconnect }) => {
     onDisconnect();
   };
 
-  // WhatsApp Ticks
   const OneTick = () => (
     <svg width="16" height="16" viewBox="0 0 16 16" className="text-gray-400">
       <path d="M2 8 L6 12 L14 4" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/>
@@ -506,7 +548,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
 
             {reactingTo === msg.id && (
               <div className="flex gap-1 mt-1 bg-white p-1 rounded-full shadow-lg">
-                {EMOJIS.map(emoji => (
+                {['Thumbs Up', 'Red Heart', 'Face with Tears of Joy', 'Loudly Crying Face', 'Pleading Face', 'Thinking Face'].map(emoji => (
                   <button key={emoji} onClick={() => addReaction(msg.id, emoji)} className="text-lg hover:scale-125 transition">
                     {emoji}
                   </button>
@@ -562,7 +604,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
 
         {showEmojiPicker && (
           <div className="absolute bottom-16 left-4 bg-white p-3 rounded-2xl shadow-xl grid grid-cols-6 gap-2">
-            {EMOJIS.map(emoji => (
+            {['Thumbs Up', 'Red Heart', 'Face with Tears of Joy', 'Loudly Crying Face', 'Pleading Face', 'Thinking Face'].map(emoji => (
               <button key={emoji} onClick={() => { setNewMessage(prev => prev + emoji); setShowEmojiPicker(false); }} className="text-2xl hover:scale-125 transition">
                 {emoji}
               </button>
@@ -574,7 +616,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
       {/* DRAWING MODAL */}
       {showDrawing && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className={`rounded-3xl p-6 shadow-2xl max-w-md w-full ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
+          <div className={`rounded-3xl p-6 shadow-2xl max-w-md w-full ${darkMode ? 'bg-gray-800' : 'bg-white'} relative`}>
             <h3 className="text-xl font-bold text-center mb-4">Draw Something Sweet!</h3>
             
             <div className="mb-4">
@@ -591,17 +633,64 @@ const ChatRoom = ({ user, onDisconnect }) => {
               </div>
             </div>
 
-            <canvas ref={canvasRef} width={300} height={300} className="border-2 border-pink-200 rounded-2xl cursor-crosshair mb-4 block mx-auto shadow-inner" style={{ backgroundColor: canvasBg }} onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={stopDrawing} onMouseLeave={stopDrawing} />
-            
+            <div className="relative">
+              <canvas 
+                ref={canvasRef} 
+                width={300} 
+                height={300} 
+                className="border-2 border-pink-200 rounded-2xl cursor-crosshair mb-4 block mx-auto shadow-inner touch-none" 
+                style={{ backgroundColor: canvasBg }} 
+                onMouseDown={startDrawing}
+                onMouseMove={(e) => { draw(e); onDrag(e); }}
+                onMouseUp={(e) => { stopDrawing(); stopDrag(); }}
+                onMouseLeave={stopDrawing}
+                onTouchStart={(e) => e.preventDefault()}
+              />
+
+              {/* DRAGGABLE EMOJIS ON CANVAS */}
+              {placedEmojis.map(item => (
+                <div
+                  key={item.id}
+                  className="absolute text-3xl cursor-move select-none"
+                  style={{ left: item.x - 18, top: item.y - 18 }}
+                  onMouseDown={(e) => startDrag(e, item)}
+                  onTouchStart={(e) => {
+                    const touch = e.touches[0];
+                    const rect = canvasRef.current.getBoundingClientRect();
+                    startDrag({ clientX: touch.clientX, clientY: touch.clientY }, item);
+                  }}
+                >
+                  {item.emoji}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); deleteEmoji(item.id); }}
+                    className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center opacity-0 hover:opacity-100 transition"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+
             <div className="flex gap-2 justify-center mb-4">
               {['#FF1493', '#FF69B4', '#9370DB', '#4169E1', '#000000', '#FFD700'].map(c => (
                 <button key={c} onClick={() => setDrawColor(c)} className={`w-8 h-8 rounded-full border-2 ${drawColor === c ? 'border-black scale-110' : 'border-gray-300'}`} style={{ backgroundColor: c }} />
               ))}
             </div>
-            
-            <div className="flex gap-2 justify-center mb-4">
-              {SKETCH_EMOJIS.map((emoji, index) => (
-                <button key={emoji} onClick={() => drawEmoji(emoji, 50 + index * 40, 50)} className="text-3xl hover:scale-125 transition">
+
+            {/* PLUS BUTTON + FULL EMOJI PALETTE */}
+            <div className="flex flex-wrap gap-1 justify-center mb-4 max-h-32 overflow-y-auto p-2 bg-gray-100 dark:bg-gray-700 rounded-xl">
+              <button
+                onClick={() => {/* Open full palette modal in future */}}
+                className="w-10 h-10 bg-gradient-to-r from-pink-500 to-purple-500 text-white rounded-xl flex items-center justify-center shadow-md hover:scale-110 transition"
+              >
+                <PlusIcon className="w-6 h-6" />
+              </button>
+              {ALL_EMOJIS.map(emoji => (
+                <button
+                  key={emoji}
+                  onClick={() => addEmojiToCanvas(emoji)}
+                  className="text-2xl hover:scale-125 transition"
+                >
                   {emoji}
                 </button>
               ))}
