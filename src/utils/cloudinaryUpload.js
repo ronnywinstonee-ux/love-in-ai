@@ -1,3 +1,4 @@
+// utils/cloudinaryUpload.js
 export const uploadPhotoToCloudinary = async (file) => {
   const formData = new FormData();
   formData.append('file', file);
@@ -9,13 +10,13 @@ export const uploadPhotoToCloudinary = async (file) => {
   );
 
   const data = await res.json();
+  if (!res.ok) throw new Error(data.error?.message || 'Upload failed');
   return data.secure_url;
 };
 
 export const uploadAudioToCloudinary = async (blob) => {
   const formData = new FormData();
   formData.append('file', blob);
-  formData.append('resource_type', 'video');
   formData.append('upload_preset', process.env.REACT_APP_CLOUDINARY_UPLOAD_PRESET);
 
   const res = await fetch(
@@ -24,5 +25,6 @@ export const uploadAudioToCloudinary = async (blob) => {
   );
 
   const data = await res.json();
+  if (!res.ok) throw new Error(data.error?.message || 'Audio upload failed');
   return data.secure_url;
 };
