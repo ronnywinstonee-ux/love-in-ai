@@ -8,11 +8,14 @@ import {
   MicrophoneIcon, 
   PaperAirplaneIcon, 
   Cog6ToothIcon,
-  UserCircleIcon
+  UserCircleIcon,
+  FaceSmileIcon
 } from '@heroicons/react/24/outline';
 
+const EMOJIS = ['Like', 'Heart', 'Haha', 'Sad', 'Angry', 'Wow'];
+
 const ChatRoom = ({ user, onDisconnect }) => {
-  console.log('FORCE PROOF: v2025.10.31 - DARK MODE + SEEN + COPY + SWIPE REPLY + AVATARS');
+  console.log('FORCE PROOF: v2025.11.01 - FULL WHATSAPP MODE');
 
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
@@ -25,9 +28,9 @@ const ChatRoom = ({ user, onDisconnect }) => {
   const [recordingTime, setRecordingTime] = useState(0);
   const [partnerTyping, setPartnerTyping] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
-  const [showReactionPicker, setShowReactionPicker] = useState(null);
   const [replyTo, setReplyTo] = useState(null);
-  const [longPressMsg, setLongPressMsg] = useState(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [reactingTo, setReactingTo] = useState(null);
   const fileInputRef = useRef(null);
   const messagesEndRef = useRef(null);
   const canvasRef = useRef(null);
@@ -52,7 +55,6 @@ const ChatRoom = ({ user, onDisconnect }) => {
     scrollToBottom();
   }, [messages, partnerTyping]);
 
-  // Load dark mode from localStorage
   useEffect(() => {
     const saved = localStorage.getItem('darkMode');
     if (saved === 'true') setDarkMode(true);
@@ -129,16 +131,24 @@ const ChatRoom = ({ user, onDisconnect }) => {
     return () => unsubscribe();
   }, [userData?.coupleCode]);
 
-  // Mark messages as seen
+  // Auto-mark as delivered when partner is online
   useEffect(() => {
-    if (!userData?.coupleCode || !messages.length) return;
+    if (!messages.length || !partnerData?.online) return;
+    messages.forEach(msg => {
+      if (msg.senderUid === user.uid && !msg.delivered && partnerData.online) {
+        update(ref(database, `chats/${userData.coupleCode}/${msg.id}`), { delivered: true });
+      }
+    });
+  }, [messages, partnerData?.online, user.uid, userData?.coupleCode]);
 
+  // Auto-mark as seen when scrolling to bottom
+  useEffect(() => {
+    if (!messages.length || !partnerData?.online) return;
     const lastMsg = messages[messages.length - 1];
     if (lastMsg.senderUid !== user.uid && !lastMsg.seen) {
-      const msgRef = ref(database, `chats/${userData.coupleCode}/${lastMsg.id}`);
-      update(msgRef, { seen: true });
+      update(ref(database, `chats/${userData.coupleCode}/${lastMsg.id}`), { seen: true });
     }
-  }, [messages, user.uid, userData?.coupleCode]);
+  }, [messages, partnerData?.online, user.uid, userData?.coupleCode]);
 
   useEffect(() => {
     if (!userData?.coupleCode || !user?.uid || !newMessage.trim()) {
@@ -171,6 +181,8 @@ const ChatRoom = ({ user, onDisconnect }) => {
         reactions: {},
         timestamp: Date.now(),
         replyTo: replyTo ? { text: replyTo.text, sender: replyTo.sender } : null,
+        sent: true,
+        delivered: false,
         seen: false
       });
       setNewMessage('');
@@ -205,6 +217,8 @@ const ChatRoom = ({ user, onDisconnect }) => {
         drawingUrl: '',
         reactions: {},
         timestamp: Date.now(),
+        sent: true,
+        delivered: false,
         seen: false
       });
     } catch (err) {
@@ -214,28 +228,137 @@ const ChatRoom = ({ user, onDisconnect }) => {
     fileInputRef.current.value = '';
   };
 
-  const startRecording = async () => { /* ... SAME AS BEFORE ... */ };
-  const stopAndSendRecording = () => { /* ... */ };
-  const cancelRecording = () => { /* ... */ };
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const mimeType = 'audio/webm;codecs=opus';
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+      const chunks = [];
+
+      mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+      mediaRecorder.onstop = async () => {
+        if (chunks.length > 0) {
+          const blob = new Blob(chunks, { type: mimeType });
+          setSending(true);
+          try {
+            const url = await uploadAudioToCloudinary(blob);
+            const chatRef = ref(database, `chats/${userData.coupleCode}`);
+            const newMsgRef = push(chatRef);
+            await set(newMsgRef, {
+              sender: userData.name || user.displayName || user.email,
+              senderUid: user.uid,
+              text: '',
+              imageUrl: '',
+              audioUrl: url,
+              drawingUrl: '',
+              reactions: {},
+              timestamp: Date.now(),
+              sent: true,
+              delivered: false,
+              seen: false
+            });
+          } catch (err) {
+            alert('Voice note failed.');
+          }
+          setSending(false);
+        }
+        stream.getTracks().forEach(t => t.stop());
+        setRecordingTime(0);
+      };
+
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start(1000);
+      setIsRecording(true);
+      setRecordingTime(0);
+
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime((t) => {
+          const newTime = t + 1;
+          if (newTime >= MAX_RECORDING_SECONDS) {
+            stopAndSendRecording();
+            return MAX_RECORDING_SECONDS;
+          }
+          return newTime;
+        });
+      }, 1000);
+
+    } catch (err) {
+      alert('Mic access denied.');
+    }
+  };
+
+  const stopAndSendRecording = () => {
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+    clearInterval(recordingTimerRef.current);
+  };
+
+  const cancelRecording = () => {
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+    }
+    setIsRecording(false);
+    clearInterval(recordingTimerRef.current);
+    setRecordingTime(0);
+  };
 
   const formatTime = (sec) => `${Math.floor(sec / 60)}:${(sec % 60).toString().padStart(2, '0')}`;
   const formatMsgTime = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-  const startDrawing = (e) => { /* ... */ };
-  const draw = (e) => { /* ... */ };
+  const startDrawing = (e) => { if (!ctx) return; setIsDrawing(true); const r = canvasRef.current.getBoundingClientRect(); ctx.beginPath(); ctx.moveTo(e.clientX - r.left, e.clientY - r.top); };
+  const draw = (e) => { if (!isDrawing || !ctx) return; const r = canvasRef.current.getBoundingClientRect(); ctx.strokeStyle = drawColor; ctx.lineTo(e.clientX - r.left, e.clientY - r.top); ctx.stroke(); };
   const stopDrawing = () => setIsDrawing(false);
   const clearCanvas = () => ctx?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
 
-  const sendDrawing = async () => { /* ... */ };
+  const sendDrawing = async () => {
+    if (!canvasRef.current) return;
+    setSending(true);
+    canvasRef.current.toBlob(async (blob) => {
+      try {
+        const url = await uploadPhotoToCloudinary(blob);
+        const chatRef = ref(database, `chats/${userData.coupleCode}`);
+        const newMsgRef = push(chatRef);
+        await set(newMsgRef, {
+          sender: userData.name || user.displayName || user.email,
+          senderUid: user.uid,
+          text: '',
+          imageUrl: '',
+          audioUrl: '',
+          drawingUrl: url,
+          reactions: {},
+          timestamp: Date.now(),
+          sent: true,
+          delivered: false,
+          seen: false
+        });
+        setShowDrawing(false);
+        clearCanvas();
+      } catch (err) { alert('Drawing failed.'); }
+      setSending(false);
+    }, 'image/png');
+  };
+
+  const addReaction = async (msgId, emoji) => {
+    const reactionRef = ref(database, `chats/${userData.coupleCode}/${msgId}/reactions/${user.uid}`);
+    const snap = await onValue(reactionRef, s => s.val(), { onlyOnce: true });
+    if (snap.val() === emoji) {
+      await remove(reactionRef);
+    } else {
+      await set(reactionRef, emoji);
+    }
+    setReactingTo(null);
+  };
 
   const deleteMessage = async (msgId) => {
     if (!window.confirm('Delete?')) return;
     await remove(ref(database, `chats/${userData.coupleCode}/${msgId}`));
-  };
-
-  const copyText = (text) => {
-    navigator.clipboard.writeText(text);
-    alert('Copied!');
   };
 
   const handleTouchStart = (e, msgId) => {
@@ -245,15 +368,51 @@ const ChatRoom = ({ user, onDisconnect }) => {
 
   const handleTouchEnd = (e) => {
     if (!touchMsgId.current) return;
-    const deltaX = e.changedTouches[0].clientX - touchStartX.current;
-    if (Math.abs(deltaX) > 50) {
+    const deltaX = e.changedTouches[0].clientX - touchStartdjX.current;
+    if (deltaX < -50) {
       const msg = messages.find(m => m.id === touchMsgId.current);
       if (msg) setReplyTo({ text: msg.text || '[Media]', sender: msg.sender });
     }
     touchMsgId.current = null;
   };
 
-  const VoiceMessage = ({ msg }) => { /* ... SAME ... */ };
+  const VoiceMessage = ({ msg }) => {
+    const audioRef = useRef(null);
+    const [duration, setDuration] = useState(0);
+    const [isPlaying, setIsPlaying] = useState(false);
+
+    useEffect(() => {
+      const audio = audioRef.current;
+      if (!audio) return;
+      audio.addEventListener('loadedmetadata', () => {
+        setDuration(Math.floor(audio.duration));
+      });
+    }, [msg.audioUrl]);
+
+    const togglePlay = () => {
+      const audio = audioRef.current;
+      if (isPlaying) audio.pause();
+      else audio.play();
+      setIsPlaying(!isPlaying);
+    };
+
+    return (
+      <div className={`flex items-center gap-3 p-3 rounded-2xl max-w-[280px] ${msg.senderUid === user.uid ? 'bg-pink-100' : 'bg-white border border-pink-200'}`}>
+        <button onClick={togglePlay} className={`w-10 h-10 rounded-full flex items-center justify-center text-white ${isPlaying ? 'bg-red-500' : 'bg-gradient-to-r from-pink-500 to-purple-500'}`}>
+          {isPlaying ? 'Pause' : 'Play'}
+        </button>
+        <div className="flex-1">
+          <div className="flex items-end gap-0.5 h-6">
+            {[...Array(15)].map((_, i) => (
+              <div key={i} className={`w-0.5 rounded-full bg-pink-400 ${isPlaying ? 'animate-ping' : ''}`} style={{ height: isPlaying ? `${20 + Math.random() * 20}px` : '12px', animationDelay: `${i * 0.1}s` }} />
+            ))}
+          </div>
+          <p className="text-xs text-gray-500">{duration ? formatTime(duration) : '0:00'}</p>
+        </div>
+        <audio ref={audioRef} src={msg.audioUrl} preload="metadata" />
+      </div>
+    );
+  };
 
   const handleDisconnect = async () => {
     if (!window.confirm('Disconnect?')) return;
@@ -334,7 +493,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
         {replyTo && (
           <div className={`mb-2 p-2 rounded-lg ${darkMode ? 'bg-gray-700' : 'bg-gray-100'} text-xs`}>
             Replying to: <span className="font-medium">{replyTo.sender}</span> — {replyTo.text}
-            <button onClick={() => setReplyTo(null)} className="ml-2 text-red-500">✕</button>
+            <button onClick={() => setReplyTo(null)} className="ml-2 text-red-500">x</button>
           </div>
         )}
 
@@ -344,8 +503,8 @@ const ChatRoom = ({ user, onDisconnect }) => {
             className={`flex flex-col ${msg.senderUid === user.uid ? 'items-end' : 'items-start'} group`}
             onTouchStart={(e) => handleTouchStart(e, msg.id)}
             onTouchEnd={handleTouchEnd}
-            onMouseDown={() => setLongPressMsg(msg.id)}
-            onMouseUp={() => setTimeout(() => setLongPressMsg(null), 300)}
+            onMouseDown={() => setReactingTo(msg.id)}
+            onMouseUp={() => setTimeout(() => setReactingTo(null), 300)}
           >
             <div className={`px-4 py-3 rounded-3xl text-sm max-w-[75%] shadow-lg ${msg.senderUid === user.uid ? (darkMode ? 'bg-purple-600 text-white' : 'bg-gradient-to-r from-pink-500 to-purple-500 text-white') : (darkMode ? 'bg-gray-700 text-white' : 'bg-white text-gray-800 border border-pink-100')} relative`}>
               {msg.replyTo && (
@@ -357,26 +516,37 @@ const ChatRoom = ({ user, onDisconnect }) => {
               {msg.imageUrl && <img src={msg.imageUrl} className="mt-1 rounded-2xl max-w-[250px] cursor-pointer" onClick={() => window.open(msg.imageUrl, '_blank')} />}
               {msg.drawingUrl && <img src={msg.drawingUrl} className="mt-1 rounded-2xl max-w-[250px] border-2 border-dashed border-pink-300" onClick={() => window.open(msg.drawingUrl, '_blank')} />}
               {msg.audioUrl && <VoiceMessage msg={msg} />}
-              {msg.reactions && Object.values(msg.reactions).map((e, i) => <span key={i} className="ml-1">{e}</span>)}
-              {longPressMsg === msg.id && msg.text && (
-                <button onClick={() => copyText(msg.text)} className="absolute top-2 right-2 bg-black/50 text-white text-xs px-2 py-1 rounded">Copy</button>
-              )}
+              {msg.reactions && Object.entries(msg.reactions).map(([uid, emoji]) => (
+                <span key={uid} className="inline-block bg-white text-xs px-1.5 py-0.5 rounded-full shadow ml-1">{emoji}</span>
+              ))}
             </div>
-            <div className="flex items-center gap-2 mt-1 text-xs text-gray-400">
+            <div className="flex items-center gap-1 mt-1 text-xs text-gray-400">
               <span>{formatMsgTime(msg.timestamp)}</span>
               {msg.senderUid === user.uid && (
-                <span className={msg.seen ? 'text-blue-500' : 'text-gray-400'}>
-                  {msg.seen ? 'Seen' : 'Sent'}
-                </span>
+                <div className="flex">
+                  {msg.sent && <span className="text-gray-400">✓</span>}
+                  {msg.delivered && <span className="text-gray-400">✓✓</span>}
+                  {msg.seen && <span className="text-blue-500">✓✓</span>}
+                </div>
               )}
             </div>
+
+            {reactingTo === msg.id && (
+              <div className="flex gap-1 mt-1 bg-white p-1 rounded-full shadow-lg">
+                {EMOJIS.map(emoji => (
+                  <button key={emoji} onClick={() => addReaction(msg.id, emoji)} className="text-lg hover:scale-125 transition">
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         ))}
         <div ref={messagesEndRef} />
       </div>
 
       {/* INPUT */}
-      <div className={`p-3 border-t-2 ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-white/80 border-pink-100'} backdrop-blur-sm`}>
+      <div className={`p-3 border-t-2 ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-white/80 border-pink-100'} backdrop-blur-sm relative`}>
         {isRecording && (
           <div className="mb-3 flex items-center justify-between bg-gradient-to-r from-red-500 to-pink-500 text-white rounded-2xl p-3 shadow-lg animate-pulse">
             <div className="flex items-center gap-3">
@@ -390,12 +560,15 @@ const ChatRoom = ({ user, onDisconnect }) => {
           </div>
         )}
         <div className="flex items-center gap-2">
+          <button onClick={() => setShowEmojiPicker(!showEmojiPicker)} className="p-2">
+            <FaceSmileIcon className={`w-6 h-6 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`} />
+          </button>
           <input 
             type="text" 
             value={newMessage} 
             onChange={(e) => setNewMessage(e.target.value)} 
             onKeyPress={handleKeyPress} 
-            placeholder="Type your message..." 
+            placeholder="Type a message..." 
             disabled={sending || isRecording}
             className={`flex-1 px-4 py-3 border-2 rounded-2xl text-sm outline-none transition-all ${darkMode ? 'bg-gray-800 border-gray-600 text-white placeholder-gray-400' : 'border-pink-200 bg-white text-gray-800 placeholder-gray-500'} focus:ring-2 focus:ring-pink-300 focus:border-pink-300 ${sending || isRecording ? 'opacity-50' : ''}`}
           />
@@ -413,6 +586,16 @@ const ChatRoom = ({ user, onDisconnect }) => {
             <MicrophoneIcon className={`w-8 h-8 ${isRecording ? 'text-red-500' : sending ? 'text-gray-400' : 'text-blue-500'} ${!sending && 'hover:scale-110'}`} />
           </button>
         </div>
+
+        {showEmojiPicker && (
+          <div className="absolute bottom-16 left-4 bg-white p-3 rounded-2xl shadow-xl grid grid-cols-6 gap-2">
+            {EMOJIS.map(emoji => (
+              <button key={emoji} onClick={() => { setNewMessage(prev => prev + emoji); setShowEmojiPicker(false); }} className="text-2xl hover:scale-125 transition">
+                {emoji}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* DRAWING MODAL */}
