@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import { auth, database } from './firebase';
-import { ref, get } from 'firebase/database';
+import { ref, get, onValue } from 'firebase/database';
 import ConnectionPanel from './components/Connection/ConnectionPanel';
 import ChatRoom from './components/Chat/ChatRoom';
 
@@ -15,21 +15,28 @@ const App = () => {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
+      
       if (currentUser) {
-        // Check if user already has a couple connection
+        // Watch user data in real-time for connection status
         const userRef = ref(database, `users/${currentUser.uid}`);
-        const snapshot = await get(userRef);
-        const data = snapshot.val();
-
-        if (data && data.coupleCode && data.partnerUid) {
-          setConnected(true);
-        } else {
-          setConnected(false);
-        }
+        
+        onValue(userRef, (snapshot) => {
+          const data = snapshot.val();
+          console.log('👤 App: User data updated:', data);
+          
+          if (data && data.coupleCode && data.partnerUid) {
+            console.log('✅ User is connected');
+            setConnected(true);
+          } else {
+            console.log('⚠️ User not connected');
+            setConnected(false);
+          }
+          setLoading(false);
+        });
       } else {
         setConnected(false);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return () => unsubscribe();
@@ -40,20 +47,40 @@ const App = () => {
       await signInWithPopup(auth, provider);
     } catch (error) {
       console.error('Login failed:', error);
+      alert('Login failed. Please try again.');
     }
   };
 
   const handleLogout = async () => {
-    await signOut(auth);
-    setUser(null);
+    const confirmed = window.confirm('Are you sure you want to logout?');
+    if (!confirmed) return;
+    
+    try {
+      await signOut(auth);
+      setUser(null);
+      setConnected(false);
+    } catch (error) {
+      console.error('Logout failed:', error);
+    }
+  };
+
+  const handleConnected = () => {
+    console.log('🎉 Connection successful!');
+    setConnected(true);
+  };
+
+  const handleDisconnected = () => {
+    console.log('💔 Disconnected!');
     setConnected(false);
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen text-gray-500">
-        <div className="w-10 h-10 border-4 border-pink-300 border-t-transparent rounded-full animate-spin mr-3"></div>
-        Loading...
+      <div className="flex items-center justify-center h-screen text-gray-500 bg-gradient-to-br from-pink-50 to-blue-50">
+        <div className="text-center">
+          <div className="w-10 h-10 border-4 border-pink-300 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+          <p>Loading...</p>
+        </div>
       </div>
     );
   }
@@ -61,11 +88,13 @@ const App = () => {
   if (!user) {
     return (
       <div className="flex flex-col items-center justify-center h-screen text-center bg-gradient-to-br from-pink-50 to-blue-50">
-        <h1 className="text-3xl font-bold text-pink-600 mb-4">💞 Welcome to AshWin Chat</h1>
-        <p className="text-gray-600 mb-6">Connect privately and chat with your special person 💕</p>
+        <div className="mb-6">
+          <h1 className="text-4xl font-bold text-pink-600 mb-2">💞 AshWin Chat</h1>
+          <p className="text-gray-600">Connect privately with your special person</p>
+        </div>
         <button
           onClick={handleLogin}
-          className="bg-gradient-to-r from-blue-400 to-pink-400 text-white px-6 py-3 rounded-2xl shadow-md hover:from-blue-500 hover:to-pink-500 transition-all duration-200 font-medium"
+          className="bg-gradient-to-r from-blue-500 to-pink-500 text-white px-8 py-3 rounded-2xl shadow-lg hover:from-blue-600 hover:to-pink-600 transition-all duration-200 font-semibold text-lg"
         >
           Sign in with Google
         </button>
@@ -78,7 +107,7 @@ const App = () => {
       <header className="flex justify-between items-center p-4 border-b border-gray-100 shadow-sm bg-white">
         <h1 className="text-xl font-semibold text-pink-500">AshWin 💕</h1>
         <div className="flex items-center gap-3">
-          <p className="text-sm text-gray-600">{user.displayName}</p>
+          <p className="text-sm text-gray-600">{user.displayName || user.email}</p>
           <button
             onClick={handleLogout}
             className="text-xs px-3 py-1 border border-pink-300 text-pink-500 rounded-xl hover:bg-pink-50 transition"
@@ -90,9 +119,9 @@ const App = () => {
 
       <main className="flex-1 flex items-center justify-center p-4">
         {!connected ? (
-          <ConnectionPanel user={user} onConnected={() => setConnected(true)} />
+          <ConnectionPanel user={user} onConnected={handleConnected} />
         ) : (
-          <ChatRoom user={user} />
+          <ChatRoom user={user} onDisconnect={handleDisconnected} />
         )}
       </main>
     </div>
