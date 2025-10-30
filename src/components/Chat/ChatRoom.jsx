@@ -15,11 +15,12 @@ import {
 
 // REAL EMOJIS — NOT TEXT
 const EMOJIS = ['Thumbs Up', 'Red Heart', 'Face with Tears of Joy', 'Loudly Crying Face', 'Pleading Face', 'Thinking Face'];
-// FIXED: Real Unicode emojis for sketch
-const SKETCH_EMOJIS = ['Heart', 'Glowing Star', 'Fire', 'Rose', 'Kiss Mark', 'Smiling Face with Tear'];
+
+// FIXED: Real Unicode emojis
+const SKETCH_EMOJIS = ['❤️', '✨', '🔥', '🌹', '😘', '🥲'];
 
 const ChatRoom = ({ user, onDisconnect }) => {
-  console.log('FORCE PROOF: v2025.11.02 - REAL EMOJIS + WHATSAPP TICKS + CLEAN SKETCH');
+  console.log('FORCE PROOF: v2025.11.02 - REAL EMOJIS (UNICODE) + WHATSAPP TICKS');
 
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
@@ -278,7 +279,6 @@ const ChatRoom = ({ user, onDisconnect }) => {
     ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
   };
 
-  // FIXED: Use real emoji, not text
   const drawEmoji = (emoji, x, y) => { 
     if (!ctx) return;
     ctx.font = '30px serif'; 
@@ -355,7 +355,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
     onDisconnect();
   };
 
-  // FIXED: WhatsApp-style ticks
+  // WhatsApp Ticks
   const OneTick = () => (
     <svg width="16" height="16" viewBox="0 0 16 16" className="text-gray-400">
       <path d="M2 8 L6 12 L14 4" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/>
@@ -482,7 +482,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
             <div className={`px-4 py-3 rounded-3xl text-sm max-w-[75%] shadow-lg ${msg.senderUid === user.uid ? (darkMode ? 'bg-purple-600 text-white' : 'bg-gradient-to-r from-pink-500 to-purple-500 text-white') : (darkMode ? 'bg-gray-700 text-white' : 'bg-white text-gray-800 border border-pink-100')} relative`}>
               {msg.replyTo && (
                 <div className={`text-xs opacity-70 mb-1 ${msg.senderUid === user.uid ? 'text-pink-200' : 'text-gray-500'}`}>
-                  ↳ {msg.replyTo.sender}: {msg.replyTo.text}
+                  Reply: {msg.replyTo.sender}: {msg.replyTo.text}
                 </div>
               )}
               {msg.text && <p className="whitespace-pre-wrap break-words">{msg.text}</p>}
@@ -599,9 +599,9 @@ const ChatRoom = ({ user, onDisconnect }) => {
               ))}
             </div>
             
-            <div className="flex gap-1 justify-center mb-4">
-              {SKETCH_EMOJIS.map(emoji => (
-                <button key={emoji} onClick={() => drawEmoji(emoji, 50 + SKETCH_EMOJIS.indexOf(emoji) * 40, 50)} className="text-2xl hover:scale-125 transition">
+            <div className="flex gap-2 justify-center mb-4">
+              {SKETCH_EMOJIS.map((emoji, index) => (
+                <button key={emoji} onClick={() => drawEmoji(emoji, 50 + index * 40, 50)} className="text-3xl hover:scale-125 transition">
                   {emoji}
                 </button>
               ))}
