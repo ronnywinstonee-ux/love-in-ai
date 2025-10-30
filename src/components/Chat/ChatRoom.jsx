@@ -10,19 +10,24 @@ import {
   Cog6ToothIcon,
   UserCircleIcon,
   FaceSmileIcon,
-  CameraIcon,
-  PlusIcon
+  CameraIcon
 } from '@heroicons/react/24/outline';
 
-// FULL EMOJI PALETTE
-const ALL_EMOJIS = [
-  '❤️', '✨', '🔥', '🌹', '😘', '🥲', '😍', '💕', '🌟', '💖',
-  '😊', '🥰', '😘', '💋', '😢', '😂', '🥹', '😜', '😎', '🤗',
-  '🌸', '🌺', '🌈', '🦋', '🌙', '⭐', '💫', '✨', '🎈', '🎉'
+// REAL EMOJIS FOR CHAT REACTIONS
+const CHAT_EMOJIS = ['Thumbs Up', 'Red Heart', 'Face with Tears of Joy', 'Loudly Crying Face', 'Pleading Face', 'Thinking Face'];
+
+// FULL EMOJI PALETTE FOR CANVAS
+const CANVAS_EMOJIS = [
+  'Red Heart', 'Sparkles', 'Fire', 'Rose', 'Kissing Face', 'Loudly Crying Face', 
+  'Smiling Face with Heart-Eyes', 'Two Hearts', 'Glowing Star', 'Sparkling Heart',
+  'Smiling Face', 'Smiling Face with Smiling Eyes', 'Kissing Face with Closed Eyes', 'Kiss Mark', 
+  'Crying Face', 'Grinning Face with Smiling Eyes', 'Pleading Face', 'Winking Face', 
+  'Smiling Face with Sunglasses', 'Hugging Face', 'Cherry Blossom', 'Hibiscus', 
+  'Rainbow', 'Butterfly', 'Crescent Moon', 'Star', 'Dizzy', 'Sparkles', 'Balloon', 'Party Popper'
 ];
 
 const ChatRoom = ({ user, onDisconnect }) => {
-  console.log('FORCE PROOF: v2025.11.03 - DRAG EMOJIS + UNLIMITED + WHATSAPP TICKS');
+  console.log('FORCE PROOF: v2025.11.04 - REAL EMOJIS + CLEAN CANVAS PICKER');
 
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
@@ -37,6 +42,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
   const [darkMode, setDarkMode] = useState(false);
   const [replyTo, setReplyTo] = useState(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showCanvasEmojiPicker, setShowCanvasEmojiPicker] = useState(false);
   const [reactingTo, setReactingTo] = useState(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [canvasBg, setCanvasBg] = useState('#ffffff');
@@ -56,7 +62,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
   const touchMsgId = useRef(null);
 
   // DRAG EMOJI STATE
-  const [placedEmojis, setPlacedEmojis] = useState([]); // { emoji, x, y, id }
+  const [placedEmojis, setPlacedEmojis] = useState([]);
   const [draggingEmoji, setDraggingEmoji] = useState(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
 
@@ -87,7 +93,6 @@ const ChatRoom = ({ user, onDisconnect }) => {
       context.lineJoin = 'round';
       context.lineWidth = 4;
       setCtx(context);
-
       redrawCanvas();
     }
   }, [showDrawing, canvasBg, placedEmojis]);
@@ -98,7 +103,6 @@ const ChatRoom = ({ user, onDisconnect }) => {
     ctx.fillStyle = canvasBg;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Redraw all placed emojis
     placedEmojis.forEach(item => {
       ctx.font = '30px serif';
       ctx.fillText(item.emoji, item.x - 15, item.y + 10);
@@ -301,6 +305,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
   const addEmojiToCanvas = (emoji, x = 150, y = 150) => {
     const newEmoji = { emoji, x, y, id: Date.now() };
     setPlacedEmojis(prev => [...prev, newEmoji]);
+    setShowCanvasEmojiPicker(false);
   };
 
   const startDrag = (e, item) => {
@@ -548,7 +553,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
 
             {reactingTo === msg.id && (
               <div className="flex gap-1 mt-1 bg-white p-1 rounded-full shadow-lg">
-                {['Thumbs Up', 'Red Heart', 'Face with Tears of Joy', 'Loudly Crying Face', 'Pleading Face', 'Thinking Face'].map(emoji => (
+                {CHAT_EMOJIS.map(emoji => (
                   <button key={emoji} onClick={() => addReaction(msg.id, emoji)} className="text-lg hover:scale-125 transition">
                     {emoji}
                   </button>
@@ -604,7 +609,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
 
         {showEmojiPicker && (
           <div className="absolute bottom-16 left-4 bg-white p-3 rounded-2xl shadow-xl grid grid-cols-6 gap-2">
-            {['Thumbs Up', 'Red Heart', 'Face with Tears of Joy', 'Loudly Crying Face', 'Pleading Face', 'Thinking Face'].map(emoji => (
+            {CHAT_EMOJIS.map(emoji => (
               <button key={emoji} onClick={() => { setNewMessage(prev => prev + emoji); setShowEmojiPicker(false); }} className="text-2xl hover:scale-125 transition">
                 {emoji}
               </button>
@@ -647,7 +652,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
                 onTouchStart={(e) => e.preventDefault()}
               />
 
-              {/* DRAGGABLE EMOJIS ON CANVAS */}
+              {/* DRAGGABLE EMOJIS */}
               {placedEmojis.map(item => (
                 <div
                   key={item.id}
@@ -677,23 +682,29 @@ const ChatRoom = ({ user, onDisconnect }) => {
               ))}
             </div>
 
-            {/* PLUS BUTTON + FULL EMOJI PALETTE */}
-            <div className="flex flex-wrap gap-1 justify-center mb-4 max-h-32 overflow-y-auto p-2 bg-gray-100 dark:bg-gray-700 rounded-xl">
+            {/* CANVAS EMOJI PICKER */}
+            <div className="relative mb-4">
               <button
-                onClick={() => {/* Open full palette modal in future */}}
-                className="w-10 h-10 bg-gradient-to-r from-pink-500 to-purple-500 text-white rounded-xl flex items-center justify-center shadow-md hover:scale-110 transition"
+                onClick={() => setShowCanvasEmojiPicker(!showCanvasEmojiPicker)}
+                className="mx-auto flex items-center gap-2 bg-gradient-to-r from-pink-500 to-purple-500 text-white px-4 py-2 rounded-xl shadow-md hover:scale-105 transition"
               >
-                <PlusIcon className="w-6 h-6" />
+                <FaceSmileIcon className="w-5 h-5" />
+                <span className="text-sm font-medium">Add Emoji</span>
               </button>
-              {ALL_EMOJIS.map(emoji => (
-                <button
-                  key={emoji}
-                  onClick={() => addEmojiToCanvas(emoji)}
-                  className="text-2xl hover:scale-125 transition"
-                >
-                  {emoji}
-                </button>
-              ))}
+
+              {showCanvasEmojiPicker && (
+                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 bg-white p-3 rounded-2xl shadow-xl grid grid-cols-6 gap-2 max-h-48 overflow-y-auto z-10">
+                  {CANVAS_EMOJIS.map(emoji => (
+                    <button
+                      key={emoji}
+                      onClick={() => addEmojiToCanvas(emoji)}
+                      className="text-2xl hover:scale-125 transition"
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             
             <div className="flex gap-2">
