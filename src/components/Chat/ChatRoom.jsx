@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ref, onValue, push, set, update, remove } from 'firebase/database';
-import { database, auth } from '../../firebase';
+import { database } from '../../firebase';
 import { uploadPhotoToCloudinary } from '../../utils/cloudinaryUpload';
 import { 
   PhotoIcon, 
@@ -13,11 +13,12 @@ import {
   CameraIcon
 } from '@heroicons/react/24/outline';
 
-const EMOJIS = ['Like', 'Heart', 'Haha', 'Sad', 'Angry', 'Wow'];
-const SKETCH_EMOJIS = ['Heart', 'Star', 'Fire', 'Rose', 'Kiss', 'Tears'];
+// REAL EMOJIS — NOT TEXT
+const EMOJIS = ['Thumbs Up', 'Red Heart', 'Face with Tears of Joy', 'Loudly Crying Face', 'Pleading Face', 'Thinking Face'];
+const SKETCH_EMOJIS = ['Red Heart', 'Glowing Star', 'Fire', 'Rose', 'Kiss Mark', 'Smiling Face with Tear'];
 
 const ChatRoom = ({ user, onDisconnect }) => {
-  console.log('FORCE PROOF: v2025.11.01 - WHATSAPP MODE + AVATARS + TICKS + EMOJI SKETCH');
+  console.log('FORCE PROOF: v2025.11.02 - REAL EMOJIS + CANVAS BG PICKER + CLEAN SKETCH');
 
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
@@ -34,6 +35,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [reactingTo, setReactingTo] = useState(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [canvasBg, setCanvasBg] = useState('#ffffff'); // Default white
   const fileInputRef = useRef(null);
   const avatarInputRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -76,8 +78,12 @@ const ChatRoom = ({ user, onDisconnect }) => {
       context.lineJoin = 'round';
       context.lineWidth = 4;
       setCtx(context);
+
+      // Set background
+      context.fillStyle = canvasBg;
+      context.fillRect(0, 0, canvas.width, canvas.height);
     }
-  }, [showDrawing]);
+  }, [showDrawing, canvasBg]);
 
   useEffect(() => {
     if (!user) return;
@@ -135,7 +141,6 @@ const ChatRoom = ({ user, onDisconnect }) => {
     return () => unsubscribe();
   }, [userData?.coupleCode]);
 
-  // Auto-mark as delivered when partner is online
   useEffect(() => {
     if (!messages.length || !partnerData?.online) return;
     messages.forEach(msg => {
@@ -145,7 +150,6 @@ const ChatRoom = ({ user, onDisconnect }) => {
     });
   }, [messages, partnerData?.online, user.uid, userData?.coupleCode]);
 
-  // Auto-mark as seen when scrolling to bottom
   useEffect(() => {
     if (!messages.length || !partnerData?.online) return;
     const lastMsg = messages[messages.length - 1];
@@ -246,18 +250,38 @@ const ChatRoom = ({ user, onDisconnect }) => {
     setUploadingAvatar(false);
   };
 
-  const startRecording = async () => { /* SAME AS BEFORE */ };
+  const startRecording = async () => { /* SAME */ };
   const stopAndSendRecording = () => { /* SAME */ };
   const cancelRecording = () => { /* SAME */ };
 
   const formatTime = (sec) => `${Math.floor(sec / 60)}:${(sec % 60).toString().padStart(2, '0')}`;
   const formatMsgTime = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-  const startDrawing = (e) => { if (!ctx) return; setIsDrawing(true); const r = canvasRef.current.getBoundingClientRect(); ctx.beginPath(); ctx.moveTo(e.clientX - r.left, e.clientY - r.top); };
-  const draw = (e) => { if (!isDrawing || !ctx) return; const r = canvasRef.current.getBoundingClientRect(); ctx.strokeStyle = drawColor; ctx.lineTo(e.clientX - r.left, e.clientY - r.top); ctx.stroke(); };
+  const startDrawing = (e) => { 
+    if (!ctx) return; 
+    setIsDrawing(true); 
+    const r = canvasRef.current.getBoundingClientRect(); 
+    ctx.beginPath(); 
+    ctx.moveTo(e.clientX - r.left, e.clientY - r.top); 
+  };
+  const draw = (e) => { 
+    if (!isDrawing || !ctx) return; 
+    const r = canvasRef.current.getBoundingClientRect(); 
+    ctx.strokeStyle = drawColor; 
+    ctx.lineTo(e.clientX - r.left, e.clientY - r.top); 
+    ctx.stroke(); 
+  };
   const stopDrawing = () => setIsDrawing(false);
-  const clearCanvas = () => ctx?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-  const drawEmoji = (emoji, x, y) => { ctx.font = '30px serif'; ctx.fillText(emoji, x, y); };
+  const clearCanvas = () => {
+    if (!ctx) return;
+    ctx.fillStyle = canvasBg;
+    ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+  };
+  const drawEmoji = (emoji, x, y) => { 
+    if (!ctx) return;
+    ctx.font = '30px serif'; 
+    ctx.fillText(emoji, x, y); 
+  };
 
   const sendDrawing = async () => {
     if (!canvasRef.current) return;
@@ -529,12 +553,30 @@ const ChatRoom = ({ user, onDisconnect }) => {
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className={`rounded-3xl p-6 shadow-2xl max-w-md w-full ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
             <h3 className="text-xl font-bold text-center mb-4">Draw Something Sweet!</h3>
-            <canvas ref={canvasRef} width={300} height={300} className="border-2 border-pink-200 rounded-2xl cursor-crosshair mb-4 block mx-auto bg-white shadow-inner" onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={stopDrawing} onMouseLeave={stopDrawing} />
+            
+            {/* Background Picker */}
+            <div className="mb-4">
+              <p className="text-sm font-medium mb-2">Background Color</p>
+              <div className="flex gap-2 justify-center">
+                {['#ffffff', '#ffe4e1', '#e6e6fa', '#f0fff0', '#fffacd', '#d3d3d3'].map(color => (
+                  <button
+                    key={color}
+                    onClick={() => setCanvasBg(color)}
+                    className={`w-8 h-8 rounded-full border-2 ${canvasBg === color ? 'border-black scale-110' : 'border-gray-300'}`}
+                    style={{ backgroundColor: color }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <canvas ref={canvasRef} width={300} height={300} className="border-2 border-pink-200 rounded-2xl cursor-crosshair mb-4 block mx-auto shadow-inner" style={{ backgroundColor: canvasBg }} onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={stopDrawing} onMouseLeave={stopDrawing} />
+            
             <div className="flex gap-2 justify-center mb-4">
               {['#FF1493', '#FF69B4', '#9370DB', '#4169E1', '#000000', '#FFD700'].map(c => (
                 <button key={c} onClick={() => setDrawColor(c)} className={`w-8 h-8 rounded-full border-2 ${drawColor === c ? 'border-black scale-110' : 'border-gray-300'}`} style={{ backgroundColor: c }} />
               ))}
             </div>
+            
             <div className="flex gap-1 justify-center mb-4">
               {SKETCH_EMOJIS.map(emoji => (
                 <button key={emoji} onClick={() => drawEmoji(emoji, 50 + SKETCH_EMOJIS.indexOf(emoji) * 40, 50)} className="text-2xl hover:scale-125 transition">
@@ -542,6 +584,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
                 </button>
               ))}
             </div>
+            
             <div className="flex gap-2">
               <button onClick={clearCanvas} className="flex-1 bg-gray-200 text-gray-700 px-4 py-2 rounded-xl hover:bg-gray-300 transition font-medium">Clear</button>
               <button onClick={() => setShowDrawing(false)} className="flex-1 bg-red-100 text-red-600 px-4 py-2 rounded-xl hover:bg-red-200 transition font-medium">Cancel</button>
