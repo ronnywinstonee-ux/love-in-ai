@@ -13,7 +13,7 @@ import {
   CameraIcon
 } from '@heroicons/react/24/outline';
 
-// REAL EMOJIS FOR CHAT REACTIONS (6)
+// REAL EMOJIS FOR CHAT REACTIONS
 const CHAT_EMOJIS = ['Thumbs Up', 'Red Heart', 'Face with Tears of Joy', 'Loudly Crying Face', 'Pleading Face', 'Thinking Face'];
 
 // 50+ REAL EMOJIS FOR CANVAS (COUPLES THEMED)
