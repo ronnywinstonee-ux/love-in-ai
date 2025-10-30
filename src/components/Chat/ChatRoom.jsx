@@ -11,7 +11,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 const ChatRoom = ({ user, onDisconnect }) => {
-  console.log('FORCE PROOF: THIS IS THE LATEST CHATROOM - v2025.10.31');
+  console.log('FORCE PROOF: THIS IS THE LATEST CHATROOM - v2025.10.31 + VOICE TIMER + CANCEL');
 
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
@@ -36,6 +36,9 @@ const ChatRoom = ({ user, onDisconnect }) => {
   const mediaRecorderRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const partnerTypingUnsubscribe = useRef(null);
+  const streamRef = useRef(null); // To stop mic
+
+  const MAX_RECORDING_SECONDS = 240; // 4 minutes
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -204,6 +207,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
       const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') 
         ? 'audio/webm;codecs=opus' 
         : 'audio/webm';
@@ -214,43 +218,77 @@ const ChatRoom = ({ user, onDisconnect }) => {
 
       mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
       mediaRecorder.onstop = async () => {
-        const blob = new Blob(chunks, { type: mimeType });
-        setSending(true);
-        try {
-          const url = await uploadAudioToCloudinary(blob);
-          const chatRef = ref(database, `chats/${userData.coupleCode}`);
-          const newMsgRef = push(chatRef);
-          await set(newMsgRef, {
-            sender: userData.name || user.displayName || user.email,
-            senderUid: user.uid,
-            text: '',
-            imageUrl: '',
-            audioUrl: url,
-            drawingUrl: '',
-            reactions: {},
-            timestamp: Date.now(),
-          });
-        } catch (err) {
-          alert('Voice failed.');
+        // Only send if user pressed "Stop & Send"
+        if (mediaRecorderRef.current?.state === 'inactive' && chunks.length > 0) {
+          const blob = new Blob(chunks, { type: mimeType });
+          setSending(true);
+          try {
+            const url = await uploadAudioToCloudinary(blob);
+            const chatRef = ref(database, `chats/${userData.coupleCode}`);
+            const newMsgRef = push(chatRef);
+            await set(newMsgRef, {
+              sender: userData.name || user.displayName || user.email,
+              senderUid: user.uid,
+              text: '',
+              imageUrl: '',
+              audioUrl: url,
+              drawingUrl: '',
+              reactions: {},
+              timestamp: Date.now(),
+            });
+            console.log('VOICE SENT');
+          } catch (err) {
+            alert('Voice note failed to send.');
+          }
+          setSending(false);
         }
-        setSending(false);
+        // Always clean up
         stream.getTracks().forEach(t => t.stop());
+        setRecordingTime(0);
       };
 
       mediaRecorderRef.current = mediaRecorder;
       mediaRecorder.start(1000);
       setIsRecording(true);
       setRecordingTime(0);
-      recordingTimerRef.current = setInterval(() => setRecordingTime(t => t + 1), 1000);
+
+      // Timer
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime((t) => {
+          const newTime = t + 1;
+          if (newTime >= MAX_RECORDING_SECONDS) {
+            stopAndSendRecording();
+            return MAX_RECORDING_SECONDS;
+          }
+          return newTime;
+        });
+      }, 1000);
+
     } catch (err) {
-      alert('Mic denied.');
+      alert('Mic access denied.');
     }
   };
 
-  const stopRecording = () => {
-    if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
+  const stopAndSendRecording = () => {
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.stop();
+    }
     setIsRecording(false);
     clearInterval(recordingTimerRef.current);
+  };
+
+  const cancelRecording = () => {
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+    }
+    setIsRecording(false);
+    clearInterval(recordingTimerRef.current);
+    setRecordingTime(0);
+    console.log('RECORDING CANCELLED');
   };
 
   const formatTime = (sec) => `${Math.floor(sec / 60)}:${(sec % 60).toString().padStart(2, '0')}`;
@@ -437,12 +475,27 @@ const ChatRoom = ({ user, onDisconnect }) => {
       {/* INPUT */}
       <div className={`p-3 border-t-2 ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-white/80 border-pink-100'} backdrop-blur-sm`}>
         {isRecording && (
-          <div className="mb-2 flex items-center justify-between bg-red-50 border border-red-200 rounded-xl p-2 animate-pulse">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
-              <span className="text-sm font-medium text-red-600">Recording... {formatTime(recordingTime)}</span>
+          <div className="mb-3 flex items-center justify-between bg-gradient-to-r from-red-500 to-pink-500 text-white rounded-2xl p-3 shadow-lg animate-pulse">
+            <div className="flex items-center gap-3">
+              <div className="w-3 h-3 bg-white rounded-full animate-ping"></div>
+              <span className="font-bold text-sm">
+                Recording... {formatTime(recordingTime)} / 4:00
+              </span>
             </div>
-            <button onClick={stopRecording} className="text-xs bg-red-500 text-white px-3 py-1 rounded-lg">Stop</button>
+            <div className="flex gap-2">
+              <button
+                onClick={cancelRecording}
+                className="bg-white text-red-600 px-3 py-1.5 rounded-xl font-bold text-xs hover:bg-red-100 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={stopAndSendRecording}
+                className="bg-white text-green-600 px-3 py-1.5 rounded-xl font-bold text-xs hover:bg-green-100 transition"
+              >
+                Send
+              </button>
+            </div>
           </div>
         )}
         <div className="flex items-center gap-2">
@@ -478,7 +531,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
           </button>
 
           <button 
-            onClick={isRecording ? stopRecording : startRecording} 
+            onClick={isRecording ? stopAndSendRecording : startRecording} 
             disabled={sending}
             className={`transition-transform ${sending ? 'opacity-50' : ''} ${isRecording ? 'animate-pulse' : ''}`}
           >
