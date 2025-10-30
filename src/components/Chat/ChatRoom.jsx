@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ref, onValue, push, set, update, remove } from 'firebase/database';
+import { ref, onValue, push, set, update, remove, get } from 'firebase/database';
 import { database } from '../../firebase';
 import { uploadPhotoToCloudinary, uploadAudioToCloudinary } from '../../utils/cloudinaryUpload';
 
@@ -13,10 +13,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
   const [showDrawing, setShowDrawing] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
-  const [playingAudio, setPlayingAudio] = useState(null);
   const [partnerTyping, setPartnerTyping] = useState(false);
-  const [darkMode, setDarkMode] = useState(false);
-  const [showReactionPicker, setShowReactionPicker] = useState(null);
   const fileInputRef = useRef(null);
   const messagesEndRef = useRef(null);
   const canvasRef = useRef(null);
@@ -26,9 +23,6 @@ const ChatRoom = ({ user, onDisconnect }) => {
   const recordingTimerRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const typingTimeoutRef = useRef(null);
-  const partnerTypingUnsubscribe = useRef(null);
-
-  console.log('🔥 NEW CHATROOM LOADED - DARK MODE:', darkMode);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -36,7 +30,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, partnerTyping]);
+  }, [messages]);
 
   // Canvas setup
   useEffect(() => {
@@ -50,58 +44,44 @@ const ChatRoom = ({ user, onDisconnect }) => {
     }
   }, [showDrawing]);
 
-  // Load user data & partner with proper cleanup
+  // Load user data
   useEffect(() => {
     if (!user) return;
-
     const userRef = ref(database, `users/${user.uid}`);
-    const userUnsubscribe = onValue(userRef, (snapshot) => {
+    const unsubscribe = onValue(userRef, (snapshot) => {
       const data = snapshot.val();
       setUserData(data);
-      console.log('👤 USER DATA LOADED:', data);
+      console.log('👤 User data loaded:', data);
 
       if (!data?.coupleCode) {
-        console.log('⚠️ NO COUPLECODE - DISCONNECTING');
+        console.log('⚠️ No coupleCode - disconnected');
         onDisconnect();
         return;
       }
 
-      // Clean up previous partner typing listener
-      if (partnerTypingUnsubscribe.current) {
-        partnerTypingUnsubscribe.current();
-      }
-
       if (data?.partnerUid) {
         const partnerRef = ref(database, `users/${data.partnerUid}`);
-        const partnerUnsubscribe = onValue(partnerRef, (snap) => {
-          const pData = snap.val();
+        onValue(partnerRef, (partnerSnap) => {
+          const pData = partnerSnap.val();
           setPartnerData(pData);
-          console.log('💑 PARTNER DATA:', pData);
-
-          // Partner typing listener with proper cleanup
-          const typingRef = ref(database, `typing/${data.coupleCode}/${data.partnerUid}`);
-          partnerTypingUnsubscribe.current = onValue(typingRef, (tSnap) => {
-            const isTyping = !!tSnap.val();
-            setPartnerTyping(isTyping);
-            console.log('⌨️ PARTNER TYPING:', isTyping);
-          });
+          console.log('💑 Partner data loaded:', pData);
         });
-        return () => partnerUnsubscribe();
+
+        // Watch partner typing
+        const typingRef = ref(database, `typing/${data.coupleCode}/${data.partnerUid}`);
+        onValue(typingRef, (typingSnap) => {
+          setPartnerTyping(!!typingSnap.val());
+        });
       }
     });
 
-    return () => {
-      userUnsubscribe();
-      if (partnerTypingUnsubscribe.current) {
-        partnerTypingUnsubscribe.current();
-      }
-    };
+    return () => unsubscribe();
   }, [user, onDisconnect]);
 
   // Load messages
   useEffect(() => {
     if (!userData?.coupleCode) return;
-    console.log('📡 LISTENING TO CHAT:', userData.coupleCode);
+    console.log('📡 Listening to chat:', userData.coupleCode);
     
     const chatRef = ref(database, `chats/${userData.coupleCode}`);
     const unsubscribe = onValue(chatRef, (snapshot) => {
@@ -111,7 +91,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
           .map(([key, val]) => ({ id: key, ...val }))
           .sort((a, b) => a.timestamp - b.timestamp);
         setMessages(msgList);
-        console.log('✅ MESSAGES LOADED:', msgList.length);
+        console.log('✅ Messages loaded:', msgList.length);
       } else {
         setMessages([]);
       }
@@ -119,45 +99,27 @@ const ChatRoom = ({ user, onDisconnect }) => {
     return () => unsubscribe();
   }, [userData?.coupleCode]);
 
-  // FIXED Typing indicator - SAFE NULL CHECKS
+  // Typing indicator
   useEffect(() => {
-    // Clear typing if no message or no connection
-    if (!userData?.coupleCode || !user?.uid || !newMessage.trim()) {
-      if (userData?.coupleCode && user?.uid) {
-        try {
-          const typingRef = ref(database, `typing/${userData.coupleCode}/${user.uid}`);
-          set(typingRef, null);
-        } catch (err) {
-          console.log('Typing clear failed (normal on disconnect)');
-        }
-      }
-      return;
-    }
+    if (!userData?.coupleCode || !user?.uid) return;
 
-    // Send typing indicator
-    try {
+    if (newMessage.trim()) {
       const typingRef = ref(database, `typing/${userData.coupleCode}/${user.uid}`);
       set(typingRef, true);
-      
+
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = setTimeout(() => {
-        try {
-          set(typingRef, null);
-        } catch (err) {
-          console.log('Typing timeout failed (normal)');
-        }
+        set(typingRef, false);
       }, 1500);
-    } catch (err) {
-      console.error('Typing indicator error:', err);
+    } else {
+      const typingRef = ref(database, `typing/${userData.coupleCode}/${user.uid}`);
+      set(typingRef, false);
     }
   }, [newMessage, userData?.coupleCode, user?.uid]);
 
   // Send text message
   const sendMessage = async () => {
-    if (!newMessage.trim() || !userData?.coupleCode) {
-      console.log('❌ CANNOT SEND: No message or no coupleCode');
-      return;
-    }
+    if (!newMessage.trim() || !userData?.coupleCode) return;
     setSending(true);
     try {
       const chatRef = ref(database, `chats/${userData.coupleCode}`);
@@ -169,14 +131,13 @@ const ChatRoom = ({ user, onDisconnect }) => {
         imageUrl: '',
         audioUrl: '',
         drawingUrl: '',
-        reactions: {},
         timestamp: Date.now(),
       });
       setNewMessage('');
-      console.log('✅ TEXT MESSAGE SENT');
+      console.log('✅ Message sent');
     } catch (err) {
-      console.error('❌ SEND FAILED:', err);
-      alert('Failed to send message. Check console.');
+      console.error('❌ Send failed:', err);
+      alert('Failed to send message.');
     }
     setSending(false);
   };
@@ -194,9 +155,9 @@ const ChatRoom = ({ user, onDisconnect }) => {
     if (!file || !userData?.coupleCode) return;
     setSending(true);
     try {
-      console.log('📸 UPLOADING IMAGE...');
+      console.log('📸 Uploading image...');
       const url = await uploadPhotoToCloudinary(file);
-      console.log('✅ IMAGE UPLOADED:', url);
+      console.log('✅ Image uploaded:', url);
       
       const chatRef = ref(database, `chats/${userData.coupleCode}`);
       const newMsgRef = push(chatRef);
@@ -207,19 +168,18 @@ const ChatRoom = ({ user, onDisconnect }) => {
         imageUrl: url,
         audioUrl: '',
         drawingUrl: '',
-        reactions: {},
         timestamp: Date.now(),
       });
-      console.log('✅ IMAGE MESSAGE SENT');
+      console.log('✅ Image message sent');
     } catch (err) {
-      console.error('❌ IMAGE FAILED:', err);
-      alert('Image upload failed. Check console.');
+      console.error('❌ Image failed:', err);
+      alert('Image upload failed.');
     }
     setSending(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // Voice recording - FIXED FORMAT
+  // Voice recording (3 minutes)
   const startRecording = async () => {
     if (!navigator.mediaDevices) {
       alert('Your browser does not support voice recording.');
@@ -228,20 +188,14 @@ const ChatRoom = ({ user, onDisconnect }) => {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') 
-        ? 'audio/webm;codecs=opus' 
-        : 'audio/webm';
-      
-      console.log('🎤 STARTING RECORDING WITH:', mimeType);
-
-      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+      const mediaRecorder = new MediaRecorder(stream);
       const chunks = [];
 
       mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
       
       mediaRecorder.onstop = async () => {
-        const blob = new Blob(chunks, { type: mimeType });
-        console.log('🎤 BLOB CREATED, SIZE:', blob.size, 'TYPE:', mimeType);
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        console.log('🎤 Recording stopped, size:', blob.size);
         
         setSending(true);
         setIsRecording(false);
@@ -249,9 +203,9 @@ const ChatRoom = ({ user, onDisconnect }) => {
         if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
         
         try {
-          console.log('📤 UPLOADING VOICE NOTE...');
+          console.log('📤 Uploading voice note...');
           const url = await uploadAudioToCloudinary(blob);
-          console.log('✅ VOICE UPLOADED:', url);
+          console.log('✅ Voice uploaded:', url);
           
           const chatRef = ref(database, `chats/${userData.coupleCode}`);
           const newMsgRef = push(chatRef);
@@ -262,20 +216,19 @@ const ChatRoom = ({ user, onDisconnect }) => {
             imageUrl: '',
             audioUrl: url,
             drawingUrl: '',
-            reactions: {},
             timestamp: Date.now(),
           });
-          console.log('✅ VOICE NOTE SENT SUCCESSFULLY');
+          console.log('✅ Voice note sent');
         } catch (err) {
-          console.error('❌ VOICE UPLOAD FAILED:', err);
-          alert('Failed to upload voice note. Check console.');
+          console.error('❌ Voice upload failed:', err);
+          alert('Failed to upload voice note.');
         }
         setSending(false);
         stream.getTracks().forEach(track => track.stop());
       };
 
       mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start(1000); // Collect data every second
+      mediaRecorder.start();
       setIsRecording(true);
       setRecordingTime(0);
 
@@ -283,14 +236,14 @@ const ChatRoom = ({ user, onDisconnect }) => {
         setRecordingTime(prev => prev + 1);
       }, 1000);
 
-      // Auto-stop after 3 minutes
+      // Stop after 3 minutes
       setTimeout(() => {
         if (mediaRecorder.state === 'recording') {
           mediaRecorder.stop();
         }
       }, 180000);
     } catch (err) {
-      console.error('❌ RECORDING ERROR:', err);
+      console.error('❌ Recording error:', err);
       alert('Failed to start recording. Check microphone permissions.');
     }
   };
@@ -298,10 +251,6 @@ const ChatRoom = ({ user, onDisconnect }) => {
   const stopRecording = () => {
     if (mediaRecorderRef.current?.state === 'recording') {
       mediaRecorderRef.current.stop();
-    }
-    setIsRecording(false);
-    if (recordingTimerRef.current) {
-      clearInterval(recordingTimerRef.current);
     }
   };
 
@@ -352,12 +301,12 @@ const ChatRoom = ({ user, onDisconnect }) => {
     
     setSending(true);
     try {
-      console.log('🎨 UPLOADING DRAWING...');
+      console.log('🎨 Uploading drawing...');
       canvasRef.current.toBlob(async (blob) => {
         if (!blob) return;
         try {
           const url = await uploadPhotoToCloudinary(blob);
-          console.log('✅ DRAWING UPLOADED:', url);
+          console.log('✅ Drawing uploaded:', url);
           
           const chatRef = ref(database, `chats/${userData.coupleCode}`);
           const newMsgRef = push(chatRef);
@@ -368,173 +317,26 @@ const ChatRoom = ({ user, onDisconnect }) => {
             imageUrl: '',
             audioUrl: '',
             drawingUrl: url,
-            reactions: {},
             timestamp: Date.now(),
           });
-          console.log('✅ DRAWING SENT');
+          console.log('✅ Drawing sent');
           setShowDrawing(false);
           clearCanvas();
         } catch (err) {
-          console.error('❌ DRAWING FAILED:', err);
+          console.error('❌ Drawing failed:', err);
           alert('Failed to send drawing.');
         }
         setSending(false);
       }, 'image/png');
     } catch (err) {
-      console.error('❌ DRAWING UPLOAD FAILED:', err);
+      console.error('❌ Drawing upload failed:', err);
       setSending(false);
     }
   };
 
-  // Reactions
-  const addReaction = async (msgId, emoji) => {
-    if (!userData?.coupleCode) return;
-    try {
-      const reactionsRef = ref(database, `chats/${userData.coupleCode}/${msgId}/reactions/${user.uid}`);
-      const snapshot = await get(reactionsRef);
-      const currentReaction = snapshot.val();
-      
-      if (currentReaction === emoji) {
-        await remove(reactionsRef);
-        console.log('✅ REACTION REMOVED:', emoji);
-      } else {
-        await set(reactionsRef, emoji);
-        console.log('✅ REACTION ADDED:', emoji);
-      }
-    } catch (err) {
-      console.error('❌ REACTION FAILED:', err);
-    }
-    setShowReactionPicker(null);
-  };
-
-  // Delete message (only own messages)
-  const deleteMessage = async (msgId) => {
-    if (!window.confirm('Delete this message?')) return;
-    if (!userData?.coupleCode) return;
-    
-    try {
-      await remove(ref(database, `chats/${userData.coupleCode}/${msgId}`));
-      console.log('✅ MESSAGE DELETED');
-    } catch (err) {
-      console.error('❌ DELETE FAILED:', err);
-      alert('Failed to delete message.');
-    }
-  };
-
-  // Voice message component - WHATSAPP STYLE
-  const VoiceMessage = ({ msg }) => {
-    const audioRef = useRef(null);
-    const [duration, setDuration] = useState(0);
-    const [isPlaying, setIsPlaying] = useState(false);
-    const [error, setError] = useState(null);
-
-    useEffect(() => {
-      const audio = audioRef.current;
-      if (!audio) return;
-
-      const handleLoadedMetadata = () => {
-        setDuration(Math.floor(audio.duration || 0));
-        console.log('🔊 AUDIO LOADED - DURATION:', audio.duration, 'URL:', msg.audioUrl);
-      };
-
-      const handleError = (e) => {
-        console.error('🔊 AUDIO PLAYBACK ERROR:', e);
-        setError('Playback failed');
-      };
-
-      const handleEnded = () => {
-        setIsPlaying(false);
-        setPlayingAudio(null);
-      };
-
-      audio.addEventListener('loadedmetadata', handleLoadedMetadata);
-      audio.addEventListener('error', handleError);
-      audio.addEventListener('ended', handleEnded);
-
-      return () => {
-        audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
-        audio.removeEventListener('error', handleError);
-        audio.removeEventListener('ended', handleEnded);
-      };
-    }, [msg.audioUrl]);
-
-    const togglePlay = () => {
-      const audio = audioRef.current;
-      if (!audio) return;
-
-      if (isPlaying) {
-        audio.pause();
-        setIsPlaying(false);
-      } else {
-        audio.play().catch((err) => {
-          console.error('❌ PLAYBACK FAILED:', err);
-          setError('Cannot play audio');
-        });
-        setIsPlaying(true);
-        setPlayingAudio(msg.id);
-      }
-    };
-
-    return (
-      <div className={`flex items-center gap-3 p-3 rounded-2xl max-w-[280px] shadow-md ${
-        msg.senderUid === user.uid 
-          ? 'bg-gradient-to-r from-pink-100 to-purple-100' 
-          : 'bg-white border border-pink-200'
-      }`}>
-        <button
-          onClick={togglePlay}
-          disabled={!!error}
-          className={`w-10 h-10 rounded-full flex items-center justify-center text-white shadow-md transition-all ${
-            isPlaying ? 'bg-red-500' : 'bg-gradient-to-r from-pink-500 to-purple-500'
-          } ${error ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105'}`}
-        >
-          {isPlaying ? '⏸️' : '▶️'}
-        </button>
-        
-        <div className="flex-1 min-w-0">
-          {/* Waveform animation */}
-          <div className="flex items-end gap-0.5 h-6 mb-1">
-            {[...Array(15)].map((_, i) => (
-              <div
-                key={i}
-                className={`w-0.5 rounded-full transition-all bg-pink-400 ${
-                  isPlaying ? 'animate-waveform' : ''
-                }`}
-                style={{
-                  height: isPlaying ? `${8 + Math.random() * 24}px` : '12px',
-                  animationDelay: `${i * 0.05}s`,
-                }}
-              />
-            ))}
-          </div>
-          
-          <p className="text-xs text-gray-500 truncate">
-            {duration ? formatTime(duration) : '0:00'}
-          </p>
-          {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
-        </div>
-        
-        {/* Hidden audio element */}
-        <audio
-          ref={audioRef}
-          src={msg.audioUrl}
-          preload="metadata"
-          onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
-          onEnded={() => setIsPlaying(false)}
-        >
-          <source src={msg.audioUrl} type="audio/webm" />
-          <source src={msg.audioUrl} type="audio/mp3" />
-          <source src={msg.audioUrl} type="audio/ogg" />
-          Your browser cannot play this audio. <a href={msg.audioUrl} target="_blank" rel="noopener noreferrer">Download</a>
-        </audio>
-      </div>
-    );
-  };
-
   // Disconnect
   const handleDisconnect = async () => {
-    const confirmed = window.confirm('💔 Disconnect from your partner? You can reconnect with someone else after.');
+    const confirmed = window.confirm('💔 Disconnect from your partner?');
     if (!confirmed) return;
 
     try {
@@ -554,12 +356,11 @@ const ChatRoom = ({ user, onDisconnect }) => {
         });
       }
 
-      console.log('✅ DISCONNECTED SUCCESSFULLY');
       alert('✅ Disconnected successfully!');
       onDisconnect();
     } catch (err) {
-      console.error('❌ DISCONNECT FAILED:', err);
-      alert('Failed to disconnect. Try again.');
+      console.error('❌ Disconnect failed:', err);
+      alert('Failed to disconnect.');
     }
   };
 
@@ -574,27 +375,22 @@ const ChatRoom = ({ user, onDisconnect }) => {
     );
   }
 
-  const reactionEmojis = ['❤️', '😂', '😢', '😡', '👍'];
-
   return (
-    <div className={`flex flex-col w-full max-w-2xl mx-auto bg-white rounded-3xl shadow-2xl border border-pink-100 h-[90vh] overflow-hidden ${darkMode ? 'bg-gray-900 text-white border-gray-700' : ''}`}>
+    <div className="flex flex-col w-full max-w-2xl mx-auto bg-white rounded-3xl shadow-2xl border border-pink-100 h-[90vh] overflow-hidden">
       {/* Header */}
-      <div className={`p-4 bg-gradient-to-r from-pink-400 via-purple-400 to-blue-400 relative overflow-hidden ${darkMode ? 'bg-gray-800' : ''}`}>
+      <div className="p-4 bg-gradient-to-r from-pink-400 via-purple-400 to-blue-400 relative overflow-hidden">
         <div className="absolute inset-0 bg-white opacity-10 animate-pulse"></div>
         <div className="relative z-10 flex justify-between items-center">
           <div className="flex items-center gap-3">
-            <div className={`w-12 h-12 ${darkMode ? 'bg-gray-700' : 'bg-white'} rounded-full flex items-center justify-center text-2xl shadow-lg`}>
+            <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-2xl shadow-lg">
               💕
             </div>
             <div>
-              <h2 className={`text-white font-bold text-lg drop-shadow-lg ${darkMode ? 'text-white' : ''}`}>💬 Love Chat</h2>
+              <h2 className="text-white font-bold text-lg drop-shadow-lg">💬 Love Chat</h2>
               {partnerData && (
                 <div className="flex items-center gap-2">
-                  <p className={`text-white text-sm font-medium drop-shadow ${darkMode ? 'text-gray-300' : ''}`}>
-                    {partnerData.name}
-                  </p>
+                  <p className="text-white text-sm font-medium drop-shadow">{partnerData.name}</p>
                   <div className={`w-2 h-2 rounded-full ${partnerData.online ? 'bg-green-300' : 'bg-gray-300'} animate-pulse`}></div>
-                  {partnerData.online && <span className={`text-xs ${darkMode ? 'text-green-400' : 'text-green-300'}`}>Active now</span>}
                 </div>
               )}
             </div>
@@ -602,45 +398,31 @@ const ChatRoom = ({ user, onDisconnect }) => {
           <button
             onClick={() => setShowSettings(!showSettings)}
             className="text-white text-3xl hover:scale-110 transition-transform duration-200 drop-shadow-lg"
-            title="Settings"
           >
             ⚙️
           </button>
         </div>
 
-        {/* Settings Dropdown */}
         {showSettings && (
-          <div className={`mt-3 p-4 ${darkMode ? 'bg-gray-700 text-white' : 'bg-white/95'} backdrop-blur-sm rounded-2xl shadow-xl space-y-3 animate-slideDown`}>
-            <div className="flex items-center justify-between pb-3 border-b ${darkMode ? 'border-gray-600' : 'border-pink-100'}">
+          <div className="mt-3 p-4 bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl space-y-3">
+            <div className="flex items-center justify-between pb-3 border-b border-pink-100">
               <div>
-                <p className={`text-xs font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Your Code</p>
+                <p className="text-xs text-gray-500 font-medium">Your Code</p>
                 <p className="text-lg font-bold text-pink-600">{userData?.userCode}</p>
               </div>
               <button
-                className="text-sm bg-gradient-to-r from-pink-500 to-purple-500 text-white px-4 py-2 rounded-xl hover:from-pink-600 hover:to-purple-600 transition-all shadow-md"
+                className="text-sm bg-gradient-to-r from-pink-500 to-purple-500 text-white px-4 py-2 rounded-xl hover:from-pink-600 hover:to-purple-600 transition shadow-md"
                 onClick={() => {
                   navigator.clipboard.writeText(userData.userCode);
-                  alert('📋 Code copied to clipboard!');
+                  alert('📋 Code copied!');
                 }}
               >
                 Copy
               </button>
             </div>
-            
-            {/* Dark Mode Toggle */}
-            <div className="flex items-center justify-between py-2">
-              <span className={`text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Dark Mode</span>
-              <button
-                onClick={() => setDarkMode(!darkMode)}
-                className={`relative w-12 h-6 rounded-full transition-colors focus:outline-none ${darkMode ? 'bg-purple-600' : 'bg-gray-300'}`}
-              >
-                <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-md transform transition-transform duration-200 ${darkMode ? 'translate-x-6' : ''}`} />
-              </button>
-            </div>
-            
             <button
               onClick={handleDisconnect}
-              className="w-full text-sm px-4 py-2 border-2 border-red-300 text-red-500 rounded-xl hover:bg-red-50 transition-all font-medium"
+              className="w-full text-sm px-4 py-2 border-2 border-red-300 text-red-500 rounded-xl hover:bg-red-50 transition font-medium"
             >
               💔 Disconnect
             </button>
@@ -649,73 +431,48 @@ const ChatRoom = ({ user, onDisconnect }) => {
       </div>
 
       {/* Messages Area */}
-      <div className={`flex-1 overflow-y-auto p-4 space-y-4 ${darkMode ? 'bg-gray-800' : 'bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50'} relative`}>
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 relative">
         {/* Typing Indicator */}
         {partnerTyping && partnerData && (
-          <div className={`flex items-center gap-2 p-3 rounded-2xl ${darkMode ? 'bg-gray-700' : 'bg-blue-50'}`}>
+          <div className="flex items-center gap-2 p-3 rounded-2xl bg-white shadow-sm border border-pink-100 animate-pulse">
             <div className="flex gap-1">
-              <div className={`w-2 h-2 rounded-full animate-bounce ${darkMode ? 'bg-gray-400' : 'bg-blue-500'}`} style={{ animationDelay: '0s' }}></div>
-              <div className={`w-2 h-2 rounded-full animate-bounce ${darkMode ? 'bg-gray-400' : 'bg-blue-500'}`} style={{ animationDelay: '0.1s' }}></div>
-              <div className={`w-2 h-2 rounded-full animate-bounce ${darkMode ? 'bg-gray-400' : 'bg-blue-500'}`} style={{ animationDelay: '0.2s' }}></div>
+              <div className="w-2 h-2 rounded-full bg-pink-400 animate-bounce" style={{ animationDelay: '0s' }}></div>
+              <div className="w-2 h-2 rounded-full bg-pink-400 animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+              <div className="w-2 h-2 rounded-full bg-pink-400 animate-bounce" style={{ animationDelay: '0.2s' }}></div>
             </div>
-            <span className={`text-sm ${darkMode ? 'text-gray-300' : 'text-blue-600'}`}>
+            <span className="text-sm text-pink-600 font-medium">
               {partnerData.name} is typing...
             </span>
           </div>
         )}
 
-        {/* Empty State */}
         {messages.length === 0 ? (
-          <div className={`text-center mt-10 ${darkMode ? 'text-gray-400' : 'text-gray-400'}`}>
+          <div className="text-center text-gray-400 mt-10">
             <p className="text-6xl mb-3 animate-bounce">💕</p>
             <p className="text-lg font-medium">Start your conversation!</p>
-            <p className="text-sm mt-2 ${darkMode ? 'text-gray-500' : 'text-gray-500'}">
-              Send a message, photo, voice note, or drawing
-            </p>
+            <p className="text-sm mt-2">Send a message, photo, voice note, or drawing</p>
           </div>
         ) : (
-          /* Messages */
           messages.map((msg, index) => (
             <div
               key={msg.id}
-              className={`flex flex-col ${msg.senderUid === user.uid ? 'items-end' : 'items-start'} animate-slideIn relative group`}
+              className={`flex flex-col ${msg.senderUid === user.uid ? 'items-end' : 'items-start'} animate-slideIn`}
               style={{ animationDelay: `${index * 0.05}s` }}
             >
               <div
-                className={`relative px-4 py-3 rounded-3xl text-sm max-w-[75%] shadow-lg transform transition-all hover:scale-[1.02] ${
+                className={`px-4 py-3 rounded-3xl text-sm max-w-[75%] shadow-lg transform transition-all hover:scale-[1.02] ${
                   msg.senderUid === user.uid
-                    ? darkMode
-                      ? 'bg-purple-600 text-white rounded-br-md'
-                      : 'bg-gradient-to-r from-pink-500 to-purple-500 text-white rounded-br-md'
-                    : darkMode
-                    ? 'bg-gray-700 text-white rounded-bl-md'
+                    ? 'bg-gradient-to-r from-pink-500 to-purple-500 text-white rounded-br-md'
                     : 'bg-white text-gray-800 rounded-bl-md border-2 border-pink-100'
                 }`}
               >
-                {/* Reaction Picker */}
-                {showReactionPicker === msg.id && (
-                  <div className="absolute -top-12 left-1/2 transform -translate-x-1/2 flex gap-2 bg-white p-2 rounded-xl shadow-lg z-10 border border-gray-200">
-                    {reactionEmojis.map((emoji) => (
-                      <button
-                        key={emoji}
-                        onClick={() => addReaction(msg.id, emoji)}
-                        className="text-2xl hover:scale-125 transition-transform p-1 rounded"
-                        title={emoji}
-                      >
-                        {emoji}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {/* Message Content */}
                 {msg.text && <p className="whitespace-pre-wrap break-words leading-relaxed">{msg.text}</p>}
                 
                 {msg.imageUrl && (
                   <img
                     src={msg.imageUrl}
-                    alt="Sent image"
-                    className="mt-2 rounded-2xl max-w-[250px] cursor-pointer hover:opacity-90 transition-opacity shadow-md"
+                    alt="sent"
+                    className="mt-2 rounded-2xl max-w-[250px] cursor-pointer hover:opacity-90 transition shadow-md"
                     onClick={() => window.open(msg.imageUrl, '_blank')}
                   />
                 )}
@@ -724,64 +481,33 @@ const ChatRoom = ({ user, onDisconnect }) => {
                   <div className="relative mt-2">
                     <img
                       src={msg.drawingUrl}
-                      alt="Drawing"
-                      className="rounded-2xl max-w-[250px] cursor-pointer hover:opacity-90 transition-opacity shadow-md border-2 border-dashed border-pink-300"
+                      alt="drawing"
+                      className="rounded-2xl max-w-[250px] cursor-pointer hover:opacity-90 transition shadow-md border-2 border-dashed border-pink-300"
                       onClick={() => window.open(msg.drawingUrl, '_blank')}
                     />
                     <span className="absolute top-2 right-2 text-xl">✏️</span>
                   </div>
                 )}
                 
-                {msg.audioUrl && <VoiceMessage msg={msg} />}
-
-                {/* Reactions Display */}
-                {msg.reactions && Object.keys(msg.reactions).length > 0 && (
-                  <div className="flex gap-1 mt-2 flex-wrap">
-                    {Object.values(msg.reactions).map((emoji, i) => (
-                      <span key={i} className="text-lg">{emoji}</span>
-                    ))}
-                  </div>
-                )}
-
-                {/* Action Buttons */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowReactionPicker(showReactionPicker === msg.id ? null : msg.id);
-                  }}
-                  className="absolute -right-3 top-1/2 transform -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-white p-2 rounded-full shadow-md text-sm hover:bg-gray-50"
-                  title="Add reaction"
-                >
-                  +1
-                </button>
-                
-                {msg.senderUid === user.uid && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      deleteMessage(msg.id);
-                    }}
-                    className="absolute -left-3 top-1/2 transform -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-red-100 p-2 rounded-full shadow-md text-sm text-red-600 hover:bg-red-200"
-                    title="Delete message"
-                  >
-                    🗑️
-                  </button>
+                {msg.audioUrl && (
+                  <audio controls className="mt-2 w-full max-w-[250px] rounded-lg">
+                    <source src={msg.audioUrl} type="audio/webm" />
+                    <source src={msg.audioUrl} type="audio/mp3" />
+                  </audio>
                 )}
               </div>
               
-              <p className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-400'} mt-1 px-2`}>
+              <p className="text-xs text-gray-400 mt-1 px-2 font-medium">
                 {formatMsgTime(msg.timestamp)}
               </p>
             </div>
           ))
         )}
-
         <div ref={messagesEndRef} />
       </div>
 
       {/* Input Area */}
-      <div className={`p-3 border-t-2 ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-white/80 border-pink-100'} backdrop-blur-sm`}>
-        {/* Recording Indicator */}
+      <div className="p-3 border-t-2 border-pink-100 bg-white/80 backdrop-blur-sm">
         {isRecording && (
           <div className="mb-3 flex items-center justify-between bg-red-50 border border-red-200 rounded-xl p-3 animate-pulse">
             <div className="flex items-center gap-2">
@@ -792,7 +518,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
             </div>
             <button
               onClick={stopRecording}
-              className="text-xs bg-red-500 text-white px-3 py-1 rounded-lg hover:bg-red-600 transition-colors"
+              className="text-xs bg-red-500 text-white px-3 py-1 rounded-lg hover:bg-red-600 transition"
             >
               Stop
             </button>
@@ -806,40 +532,32 @@ const ChatRoom = ({ user, onDisconnect }) => {
             onChange={(e) => setNewMessage(e.target.value)}
             onKeyPress={handleKeyPress}
             placeholder="Type your message..."
-            disabled={sending || isRecording}
-            className={`flex-1 px-4 py-3 border-2 rounded-2xl focus:ring-2 focus:ring-pink-300 focus:border-pink-300 text-sm outline-none transition-all disabled:bg-gray-50 disabled:cursor-not-allowed ${
-              darkMode
-                ? 'bg-gray-800 border-gray-600 text-white placeholder-gray-400'
-                : 'border-pink-200 bg-white text-gray-800 placeholder-gray-500'
-            } ${sending || isRecording ? 'opacity-50' : ''}`}
+            disabled={sending}
+            className="flex-1 px-4 py-3 border-2 border-pink-200 rounded-2xl focus:ring-2 focus:ring-pink-300 focus:border-pink-300 text-sm outline-none disabled:bg-gray-50 transition-all"
           />
           
           <button
             onClick={sendMessage}
-            disabled={sending || !newMessage.trim() || isRecording}
-            className={`px-6 py-3 rounded-2xl font-semibold shadow-lg transition-all ${
-              sending || !newMessage.trim() || isRecording
-                ? 'opacity-50 cursor-not-allowed'
-                : 'bg-gradient-to-r from-pink-500 to-purple-500 text-white hover:from-pink-600 hover:to-purple-600 hover:scale-105'
-            }`}
+            disabled={sending || !newMessage.trim()}
+            className="bg-gradient-to-r from-pink-500 to-purple-500 text-white px-6 py-3 rounded-2xl hover:from-pink-600 hover:to-purple-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-semibold shadow-lg transform hover:scale-105"
           >
             {sending ? '⏳' : '💌'}
           </button>
           
           <button
             onClick={() => fileInputRef.current?.click()}
-            disabled={sending || isRecording}
-            className={`text-2xl transition-transform ${sending || isRecording ? 'opacity-50 cursor-not-allowed' : 'text-pink-500 hover:scale-110'}`}
-            title="Send photo"
+            disabled={sending}
+            className="text-pink-500 text-3xl hover:scale-110 transition-transform disabled:opacity-50"
+            title="Send Image"
           >
             📸
           </button>
           
           <button
             onClick={() => setShowDrawing(true)}
-            disabled={sending || isRecording}
-            className={`text-2xl transition-transform ${sending || isRecording ? 'opacity-50 cursor-not-allowed' : 'text-purple-500 hover:scale-110'}`}
-            title="Draw something"
+            disabled={sending}
+            className="text-purple-500 text-3xl hover:scale-110 transition-transform disabled:opacity-50"
+            title="Draw & Send"
           >
             ✏️
           </button>
@@ -847,10 +565,8 @@ const ChatRoom = ({ user, onDisconnect }) => {
           <button
             onClick={isRecording ? stopRecording : startRecording}
             disabled={sending}
-            className={`text-2xl transition-transform ${sending ? 'opacity-50 cursor-not-allowed' : ''} ${
-              isRecording ? 'text-red-500 animate-pulse' : 'text-blue-500 hover:scale-110'
-            }`}
-            title={isRecording ? 'Stop recording' : 'Voice note (3 min max)'}
+            className={`text-3xl hover:scale-110 transition-transform disabled:opacity-50 ${isRecording ? 'text-red-500 animate-pulse' : 'text-blue-500'}`}
+            title={isRecording ? 'Stop Recording' : 'Voice Note (3 min)'}
           >
             🎤
           </button>
@@ -867,28 +583,28 @@ const ChatRoom = ({ user, onDisconnect }) => {
 
       {/* Drawing Modal */}
       {showDrawing && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className={`rounded-3xl p-6 shadow-2xl max-w-md w-full mx-4 ${darkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-800'}`}>
-            <h3 className="text-xl font-bold text-center mb-4">✏️ Draw Something Sweet!</h3>
+        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn">
+          <div className="bg-white rounded-3xl p-6 shadow-2xl max-w-md w-full mx-4">
+            <h3 className="text-xl font-bold text-gray-800 mb-4 text-center">✏️ Draw Something!</h3>
             
             <canvas
               ref={canvasRef}
               width={400}
               height={400}
-              className={`border-4 rounded-2xl cursor-crosshair mb-4 block mx-auto shadow-inner ${darkMode ? 'bg-gray-700 border-gray-600' : 'bg-white border-pink-200'}`}
+              className="border-4 border-pink-200 rounded-2xl cursor-crosshair mb-4 bg-white shadow-inner"
               onMouseDown={startDrawing}
               onMouseMove={draw}
               onMouseUp={stopDrawing}
               onMouseLeave={stopDrawing}
             />
             
-            <div className="flex gap-2 justify-center mb-4 flex-wrap">
-              {['#FF1493', '#FF69B4', '#9370DB', '#4169E1', '#000000', '#FFD700'].map((color) => (
+            <div className="flex gap-2 mb-4 justify-center flex-wrap">
+              {['#FF1493', '#FF69B4', '#9370DB', '#4169E1', '#000000', '#FFD700'].map(color => (
                 <button
                   key={color}
                   onClick={() => setDrawColor(color)}
                   className={`w-10 h-10 rounded-full border-4 transition-transform hover:scale-110 ${
-                    drawColor === color ? 'border-black scale-110' : 'border-gray-300'
+                    drawColor === color ? 'border-gray-800 scale-110' : 'border-gray-300'
                   }`}
                   style={{ backgroundColor: color }}
                 />
@@ -911,13 +627,9 @@ const ChatRoom = ({ user, onDisconnect }) => {
               <button
                 onClick={sendDrawing}
                 disabled={sending}
-                className={`flex-1 px-4 py-2 rounded-xl font-semibold shadow-lg transition-all ${
-                  sending
-                    ? 'opacity-50 cursor-not-allowed'
-                    : 'bg-gradient-to-r from-pink-500 to-purple-500 text-white hover:from-pink-600 hover:to-purple-600'
-                }`}
+                className="flex-1 bg-gradient-to-r from-pink-500 to-purple-500 text-white px-4 py-2 rounded-xl hover:from-pink-600 hover:to-purple-600 transition disabled:opacity-50 font-semibold shadow-lg"
               >
-                {sending ? '⏳ Sending...' : 'Send 💕'}
+                {sending ? '⏳' : 'Send 💕'}
               </button>
             </div>
           </div>
@@ -935,34 +647,22 @@ const ChatRoom = ({ user, onDisconnect }) => {
             transform: translateY(0);
           }
         }
-        @keyframes slideDown {
+        
+        @keyframes fadeIn {
           from {
             opacity: 0;
-            transform: translateY(-10px);
           }
           to {
             opacity: 1;
-            transform: translateY(0);
           }
         }
-        @keyframes waveform {
-          0%, 100% {
-            height: 8px;
-            opacity: 0.4;
-          }
-          50% {
-            height: 24px;
-            opacity: 1;
-          }
-        }
+        
         .animate-slideIn {
           animation: slideIn 0.3s ease-out;
         }
-        .animate-slideDown {
-          animation: slideDown 0.3s ease-out;
-        }
-        .animate-waveform {
-          animation: waveform 0.6s ease-in-out infinite;
+        
+        .animate-fadeIn {
+          animation: fadeIn 0.3s ease-out;
         }
       `}</style>
     </div>
