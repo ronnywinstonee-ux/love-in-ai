@@ -15,10 +15,11 @@ import {
 
 // REAL EMOJIS — NOT TEXT
 const EMOJIS = ['Thumbs Up', 'Red Heart', 'Face with Tears of Joy', 'Loudly Crying Face', 'Pleading Face', 'Thinking Face'];
-const SKETCH_EMOJIS = ['Red Heart', 'Glowing Star', 'Fire', 'Rose', 'Kiss Mark', 'Smiling Face with Tear'];
+// FIXED: Real Unicode emojis for sketch
+const SKETCH_EMOJIS = ['Heart', 'Glowing Star', 'Fire', 'Rose', 'Kiss Mark', 'Smiling Face with Tear'];
 
 const ChatRoom = ({ user, onDisconnect }) => {
-  console.log('FORCE PROOF: v2025.11.02 - REAL EMOJIS + CANVAS BG PICKER + CLEAN SKETCH');
+  console.log('FORCE PROOF: v2025.11.02 - REAL EMOJIS + WHATSAPP TICKS + CLEAN SKETCH');
 
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
@@ -35,7 +36,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [reactingTo, setReactingTo] = useState(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
-  const [canvasBg, setCanvasBg] = useState('#ffffff'); // Default white
+  const [canvasBg, setCanvasBg] = useState('#ffffff');
   const fileInputRef = useRef(null);
   const avatarInputRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -79,7 +80,6 @@ const ChatRoom = ({ user, onDisconnect }) => {
       context.lineWidth = 4;
       setCtx(context);
 
-      // Set background
       context.fillStyle = canvasBg;
       context.fillRect(0, 0, canvas.width, canvas.height);
     }
@@ -277,6 +277,8 @@ const ChatRoom = ({ user, onDisconnect }) => {
     ctx.fillStyle = canvasBg;
     ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
   };
+
+  // FIXED: Use real emoji, not text
   const drawEmoji = (emoji, x, y) => { 
     if (!ctx) return;
     ctx.font = '30px serif'; 
@@ -352,6 +354,27 @@ const ChatRoom = ({ user, onDisconnect }) => {
     }
     onDisconnect();
   };
+
+  // FIXED: WhatsApp-style ticks
+  const OneTick = () => (
+    <svg width="16" height="16" viewBox="0 0 16 16" className="text-gray-400">
+      <path d="M2 8 L6 12 L14 4" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/>
+    </svg>
+  );
+
+  const TwoGrayTicks = () => (
+    <svg width="16" height="16" viewBox="0 0 16 16" className="text-gray-400">
+      <path d="M2 8 L6 12 L14 4" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/>
+      <path d="M8 8 L12 12" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/>
+    </svg>
+  );
+
+  const TwoBlueTicks = () => (
+    <svg width="16" height="16" viewBox="0 0 16 16" className="text-blue-500">
+      <path d="M2 8 L6 12 L14 4" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/>
+      <path d="M8 8 L12 12" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/>
+    </svg>
+  );
 
   if (!userData?.coupleCode) {
     return <div className="flex items-center justify-center h-full"><div className="text-center"><div className="w-10 h-10 border-4 border-pink-300 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div><p>Loading...</p></div></div>;
@@ -473,10 +496,10 @@ const ChatRoom = ({ user, onDisconnect }) => {
             <div className="flex items-center gap-1 mt-1 text-xs text-gray-400">
               <span>{formatMsgTime(msg.timestamp)}</span>
               {msg.senderUid === user.uid && (
-                <div className="flex">
-                  {msg.sent && <span className="text-gray-400">Sent</span>}
-                  {msg.delivered && <span className="text-gray-400">Delivered</span>}
-                  {msg.seen && <span className="text-blue-500">Seen</span>}
+                <div className="flex items-center">
+                  {msg.sent && !msg.delivered && <OneTick />}
+                  {msg.delivered && !msg.seen && <TwoGrayTicks />}
+                  {msg.seen && <TwoBlueTicks />}
                 </div>
               )}
             </div>
@@ -554,7 +577,6 @@ const ChatRoom = ({ user, onDisconnect }) => {
           <div className={`rounded-3xl p-6 shadow-2xl max-w-md w-full ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
             <h3 className="text-xl font-bold text-center mb-4">Draw Something Sweet!</h3>
             
-            {/* Background Picker */}
             <div className="mb-4">
               <p className="text-sm font-medium mb-2">Background Color</p>
               <div className="flex gap-2 justify-center">
