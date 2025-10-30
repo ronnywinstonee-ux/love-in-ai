@@ -13,21 +13,25 @@ import {
   CameraIcon
 } from '@heroicons/react/24/outline';
 
-// REAL EMOJIS FOR CHAT REACTIONS
+// REAL EMOJIS FOR CHAT REACTIONS (6)
 const CHAT_EMOJIS = ['Thumbs Up', 'Red Heart', 'Face with Tears of Joy', 'Loudly Crying Face', 'Pleading Face', 'Thinking Face'];
 
-// FULL EMOJI PALETTE FOR CANVAS
+// 50+ REAL EMOJIS FOR CANVAS (COUPLES THEMED)
 const CANVAS_EMOJIS = [
   'Red Heart', 'Sparkles', 'Fire', 'Rose', 'Kissing Face', 'Loudly Crying Face', 
   'Smiling Face with Heart-Eyes', 'Two Hearts', 'Glowing Star', 'Sparkling Heart',
   'Smiling Face', 'Smiling Face with Smiling Eyes', 'Kissing Face with Closed Eyes', 'Kiss Mark', 
   'Crying Face', 'Grinning Face with Smiling Eyes', 'Pleading Face', 'Winking Face', 
   'Smiling Face with Sunglasses', 'Hugging Face', 'Cherry Blossom', 'Hibiscus', 
-  'Rainbow', 'Butterfly', 'Crescent Moon', 'Star', 'Dizzy', 'Sparkles', 'Balloon', 'Party Popper'
+  'Rainbow', 'Butterfly', 'Crescent Moon', 'Star', 'Dizzy', 'Sparkles', 'Balloon', 'Party Popper',
+  'Heart Suit', 'Revolving Hearts', 'Beating Heart', 'Growing Heart', 'Heart with Arrow',
+  'Heart with Ribbon', 'Hundred Points', 'Smiling Face with Halo', 'Smiling Face with Hearts',
+  'Star-Struck', 'Partying Face', 'Woozy Face', 'Hot Face', 'Cold Face', 'Pleading Face',
+  'Smirking Face', 'Unamused Face', 'Pensive Face', 'Confused Face', 'Upside-Down Face'
 ];
 
 const ChatRoom = ({ user, onDisconnect }) => {
-  console.log('FORCE PROOF: v2025.11.04 - REAL EMOJIS + CLEAN CANVAS PICKER');
+  console.log('FORCE PROOF: v2025.11.05 - 100% REAL EMOJIS EVERYWHERE');
 
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
@@ -670,7 +674,7 @@ const ChatRoom = ({ user, onDisconnect }) => {
                     onClick={(e) => { e.stopPropagation(); deleteEmoji(item.id); }}
                     className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center opacity-0 hover:opacity-100 transition"
                   >
-                    ×
+                    x
                   </button>
                 </div>
               ))}
